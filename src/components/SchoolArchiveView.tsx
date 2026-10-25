@@ -70,6 +70,10 @@ export function SchoolArchiveView({
   const [selectedAdminSubject, setSelectedAdminSubject] = useState<string | null>(null);
   const [selectedAdminTeacher, setSelectedAdminTeacher] = useState<string | null>(null);
 
+  // Examiner Hierarchical Filter States
+  const [selectedExaminerSchool, setSelectedExaminerSchool] = useState<string | null>(null);
+  const [selectedExaminerTeacher, setSelectedExaminerTeacher] = useState<string | null>(null);
+
   // Unique school/subject lists for admin dropdown selector
   const uniqueSchools = Array.from(new Set(archivedForms.map(f => f.schoolName).filter(Boolean))) as string[];
   const uniqueSubjects = Array.from(new Set(archivedForms.map(f => f.subject || f.subjectName).filter(Boolean))) as string[];
@@ -526,6 +530,12 @@ export function SchoolArchiveView({
         }
       }
 
+      // Examiner hierarchical drill-down (School -> Teachers -> Uploads)
+      if (userProfile?.role === 'moderator' || userProfile?.roleType === 'moderator') {
+        if (selectedExaminerSchool && form.schoolName !== selectedExaminerSchool) return false;
+        if (selectedExaminerTeacher && (form.teacherName || form.schoolEmail || 'معلم المادة') !== selectedExaminerTeacher) return false;
+      }
+
       if (certifiedOnly) {
         // In Certified Archive, only show forms that are fully signed
         return matchesSearch && isFullySigned;
@@ -851,6 +861,124 @@ export function SchoolArchiveView({
               />
               <Search className="absolute top-3 right-3 w-4 h-4 text-slate-400" />
             </div>
+
+            {/* Examiner Hierarchical Drill-Down Navigation (School -> Teachers) */}
+            {(userProfile?.role === 'moderator' || userProfile?.roleType === 'moderator') && (
+              <div className="bg-gradient-to-br from-slate-900 via-[#1b3b2b] to-[#0a4d28] rounded-2xl p-4 text-white shadow-md space-y-3.5 text-right" dir="rtl">
+                <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span className="text-xs font-black tracking-wide text-emerald-300">
+                      {language === 'ar' ? '🗂️ شجرة أرشيف الفاحص (حسب المدرسة ثم المعلم)' : 'Examiner Archive Tree (School -> Teacher)'}
+                    </span>
+                  </div>
+                  {(selectedExaminerSchool || selectedExaminerTeacher) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedExaminerTeacher) {
+                          setSelectedExaminerTeacher(null);
+                        } else if (selectedExaminerSchool) {
+                          setSelectedExaminerSchool(null);
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-white/10 hover:bg-white/20 text-emerald-300 rounded-lg text-[10px] font-black transition-all cursor-pointer border border-emerald-300/30"
+                    >
+                      {language === 'ar' ? '← رجوع للخلف' : '← Back'}
+                    </button>
+                  )}
+                </div>
+
+                {/* Breadcrumb indicator */}
+                <div className="bg-white/10 border border-white/15 rounded-xl px-3 py-2 text-[11px] font-extrabold text-emerald-200 truncate flex items-center justify-between">
+                  <span className="truncate">
+                    {!selectedExaminerSchool 
+                      ? (language === 'ar' ? '📍 الخطوة 1: اختر المدرسة' : 'Step 1: Select School')
+                      : !selectedExaminerTeacher
+                      ? `${selectedExaminerSchool} > ${language === 'ar' ? '📍 الخطوة 2: اختر المعلم' : 'Step 2: Select Teacher'}`
+                      : `${selectedExaminerSchool} > ${selectedExaminerTeacher}`
+                    }
+                  </span>
+                </div>
+
+                {/* Level 1: Schools List */}
+                {!selectedExaminerSchool ? (
+                  <div className="space-y-2 max-h-[38vh] overflow-y-auto pr-1">
+                    {uniqueSchools.length === 0 ? (
+                      <p className="text-center text-xs text-slate-300 py-6">{language === 'ar' ? 'لا توجد مدارس مسجلة.' : 'No schools found.'}</p>
+                    ) : (
+                      uniqueSchools.map((sch, idx) => {
+                        const count = archivedForms.filter(f => f.schoolName === sch).length;
+                        return (
+                          <div
+                            key={`exam-sch-${idx}`}
+                            onClick={() => {
+                              setSelectedExaminerSchool(sch);
+                              setSelectedExaminerTeacher(null);
+                            }}
+                            className="p-3.5 bg-white/10 hover:bg-white/20 border border-white/15 hover:border-emerald-400/60 rounded-xl cursor-pointer transition-all flex items-center justify-between text-right group shadow-xs"
+                          >
+                            <div className="flex items-center gap-2.5 truncate">
+                              <span className="text-lg p-1.5 rounded-lg bg-emerald-400/20 text-emerald-300">🏛️</span>
+                              <span className="font-extrabold text-white text-xs sm:text-sm truncate group-hover:text-emerald-300 transition-colors">{sch}</span>
+                            </div>
+                            <span className="text-[10.5px] bg-emerald-400/20 text-emerald-300 border border-emerald-400/30 px-2.5 py-1 rounded-full font-bold">
+                              {count} {language === 'ar' ? 'ملفات' : 'Files'}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : !selectedExaminerTeacher ? (
+                  // Level 2: Teachers List for Selected School
+                  <div className="space-y-2 max-h-[38vh] overflow-y-auto pr-1">
+                    {Array.from(new Set(archivedForms.filter(f => f.schoolName === selectedExaminerSchool).map(f => f.teacherName || f.schoolEmail || 'معلم المادة').filter(Boolean))).length === 0 ? (
+                      <p className="text-center text-xs text-slate-300 py-6">{language === 'ar' ? 'لا يوجد معلمون لهذه المدرسة.' : 'No teachers found.'}</p>
+                    ) : (
+                      Array.from(new Set(archivedForms.filter(f => f.schoolName === selectedExaminerSchool).map(f => f.teacherName || f.schoolEmail || 'معلم المادة').filter(Boolean))).map((teach, idx) => {
+                        const teacherUploads = archivedForms.filter(f => f.schoolName === selectedExaminerSchool && (f.teacherName || f.schoolEmail || 'معلم المادة') === teach);
+                        const firstForm = teacherUploads[0];
+                        return (
+                          <div
+                            key={`exam-teach-${idx}`}
+                            onClick={() => {
+                              setSelectedExaminerTeacher(teach);
+                              if (firstForm) {
+                                setSelectedForm(firstForm);
+                              }
+                            }}
+                            className="p-3.5 bg-white/10 hover:bg-white/20 border border-white/15 hover:border-amber-400/60 rounded-xl cursor-pointer transition-all flex items-center justify-between text-right group shadow-xs"
+                          >
+                            <div className="flex items-center gap-2.5 truncate">
+                              <span className="text-lg p-1.5 rounded-lg bg-amber-400/20 text-amber-300">👨‍🏫</span>
+                              <div>
+                                <span className="font-extrabold text-white text-xs sm:text-sm truncate group-hover:text-amber-300 transition-colors block">{teach}</span>
+                                <span className="text-[10px] text-slate-300 font-medium">{firstForm?.subject || firstForm?.grade || ''} ({teacherUploads.length} ملفات)</span>
+                              </div>
+                            </div>
+                            <span className="text-[10px] bg-amber-400/20 text-amber-300 border border-amber-400/30 px-2.5 py-1 rounded-full font-extrabold">
+                              {language === 'ar' ? 'عرض مرفقات المعلم ➔' : 'View Uploads ➔'}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : (
+                  <div className="bg-white/10 p-3.5 rounded-xl border border-white/20 text-center space-y-2">
+                    <p className="text-xs font-black text-emerald-300">✓ {selectedExaminerTeacher}</p>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedExaminerTeacher(null)}
+                      className="text-[10.5px] font-black text-white hover:text-emerald-300 underline cursor-pointer"
+                    >
+                      {language === 'ar' ? '← العودة لقائمة المعلمين بالمدرسة' : '← Back to Teachers'}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* System Admin Hierarchical Drill-Down Navigation */}
             {userProfile?.role === 'admin' && (
@@ -1498,11 +1626,11 @@ export function SchoolArchiveView({
                 {/* Top Omani Ministry Logo Header Grid */}
                 <div className="flex items-center justify-between border-b border-slate-300 pb-3 mb-4 relative z-10">
                   
-                  {/* Upper Right: Logo of Oman only (no writing) */}
+                  {/* Upper Right: Ministry of Education Logo */}
                   <div className="text-right flex items-center justify-start">
                     <img 
-                      src={logoOmanEmblem} 
-                      alt="شعار سلطنة عُمان" 
+                      src={logoMoe} 
+                      alt="شعار وزارة التعليم" 
                       className="w-16 h-16 sm:w-20 sm:h-20 object-contain"
                       referrerPolicy="no-referrer"
                     />

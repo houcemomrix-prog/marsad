@@ -29,8 +29,7 @@ import {
 import { UserProfile, SchoolReport, TeacherNotification, isDualRoleAccount } from '../types';
 import { getTranslatedText, Language, translateSubject } from '../lib/translations';
 import { getSchoolReports, getTeacherNotifications, markTeacherNotificationRead } from '../services/db';
-import logoEmblem from './logo-emblem.svg';
-import logoMoe from '../../photo.jpg';
+import { LOGO_MOE_B64 as logoMoe } from '../data/logoDataUrls';
 
 const SUBJECTS = [
   'Arabic Language', 'English Language', 'Mathematics', 
