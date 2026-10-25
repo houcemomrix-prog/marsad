@@ -279,40 +279,6 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
               : "Unified educational platform for submitting, verifying, and moderating school assessments."}
           </p>
         </div>
-
-        {/* Quick Admin One-Click Button */}
-        <div className="max-w-md mx-auto pt-1">
-          <button
-            type="button"
-            id="quick-admin-login-btn"
-            onClick={() => {
-              setSelectedAuthRole('admin');
-              setLoginEmail('hossam9866@moe.om');
-              setLoginPassword('Skype123@');
-              setIsSignUpMode(false);
-              handleAuthForCredentials('hossam9866@moe.om', 'Skype123@');
-            }}
-            className="w-full py-2.5 px-3.5 bg-slate-900 hover:bg-slate-950 text-white rounded-2xl border border-amber-400/50 shadow-sm flex items-center justify-between cursor-pointer transition-all transform hover:scale-[1.01]"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="p-1.5 rounded-xl bg-amber-400 text-slate-950 font-black shrink-0">
-                <Lock className="w-4 h-4" />
-              </div>
-              <div className="text-right leading-tight">
-                <div className="text-[11px] font-black text-amber-300 flex items-center gap-1.5">
-                  <span>{language === 'ar' ? "دخول سريع أخصائي النظام:" : "Quick Admin Login:"}</span>
-                  <span className="font-mono text-[10px] text-white underline">hossam9866@moe.om</span>
-                </div>
-                <div className="text-[9.5px] text-slate-300 font-medium">
-                  {language === 'ar' ? "أ. حسام عمري (مدير النظام والتحكم)" : "Hossam Omri (System Admin)"}
-                </div>
-              </div>
-            </div>
-            <div className="text-amber-400 text-xs font-bold px-2 py-1 bg-amber-400/10 rounded-lg">
-              {language === 'ar' ? "دخول بنقرة واحدة ⚡" : "One-Click Open ⚡"}
-            </div>
-          </button>
-        </div>
       </div>
 
       {/* Embedded Alerts */}
