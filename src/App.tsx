@@ -254,8 +254,8 @@ export default function App() {
       setLoginEmail('');
       setLoginPassword('');
     } else if (selectedAuthRole === 'admin') {
-      setLoginEmail('hossam9866@moe.om');
-      setLoginPassword('Skype123@');
+      setLoginEmail('');
+      setLoginPassword('');
     }
   }, [selectedAuthRole]);
 
@@ -1597,8 +1597,60 @@ export default function App() {
   };
 
   // --- EMAIL AND PASSWORD AUTHENTICATION & DIRECT TESTING GATEWAY ---
-  const handleAuthForCredentials = async (email: string, pass: string) => {
+  const handleAuthForCredentials = async (email: string, pass: string, roleSelection: 'none' | 'director' | 'teacher' | 'moderator' | 'admin') => {
+    if (!roleSelection || roleSelection === 'none') {
+      handleError(language === 'ar' ? "يرجى تحديد الصفة المهنية أولاً قبل تسجيل الدخول." : "Please select your professional role before logging in.");
+      return;
+    }
+
     const trimmedEmail = email.trim().toLowerCase();
+
+    // Check account vs selected role compatibility
+    const isAccountAdmin = trimmedEmail === 'hossam9866@moe.om' || trimmedEmail === 'housmhousm17@gmail.com';
+    const isAccountDirector = trimmedEmail === 'school@moe.om';
+    const isAccountTeacher = trimmedEmail === 'teacher@moe.om';
+    const isAccountModerator = trimmedEmail === 'moderator@moe.om';
+
+    if (isAccountAdmin && roleSelection !== 'admin') {
+      handleError(language === 'ar' 
+        ? "عذراً، هذا الحساب مرتبط بصفة (مدير النظام)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
+        : "Error: This account requires the 'System Admin' role.");
+      return;
+    }
+    if (isAccountDirector && roleSelection !== 'director') {
+      handleError(language === 'ar' 
+        ? "عذراً، هذا الحساب مرتبط بصفة (مدير مدرسة)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
+        : "Error: This account requires the 'School Principal' role.");
+      return;
+    }
+    if (isAccountTeacher && roleSelection !== 'teacher') {
+      handleError(language === 'ar' 
+        ? "عذراً، هذا الحساب مرتبط بصفة (معلم مادة)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
+        : "Error: This account requires the 'Subject Teacher' role.");
+      return;
+    }
+    if (isAccountModerator && roleSelection !== 'moderator') {
+      handleError(language === 'ar' 
+        ? "عذراً، هذا الحساب مرتبط بصفة (مدقق مادة)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
+        : "Error: This account requires the 'Subject Auditor' role.");
+      return;
+    }
+
+    // For other custom users, check profile in database
+    const uid = 'user-' + trimmedEmail.replace(/[^a-zA-Z0-9]/g, '');
+    const prof = await getUserProfile(uid);
+    if (prof) {
+      let userAssignedRoleType = prof.role;
+      if (prof.role === 'school') {
+        userAssignedRoleType = prof.roleType === 'administrative' ? 'director' : 'teacher';
+      }
+      if (userAssignedRoleType !== roleSelection && prof.role !== 'admin') {
+        handleError(language === 'ar' 
+          ? `عذراً، صفة الحساب المحددة لا تتطابق مع صلاحيات هذا المستخدم.` 
+          : `Error: Selected role does not match registered account permissions.`);
+        return;
+      }
+    }
     
     // Check if there is a custom updated password from the "Forgot Password" OTP flow
     const savedPasswords = JSON.parse(localStorage.getItem('oman_moe_custom_passwords') || '{}');

@@ -1081,10 +1081,11 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
               <form 
                 onSubmit={async (e) => {
                   e.preventDefault();
-                  await handleAuthForCredentials(loginEmail, loginPassword);
+                  await handleAuthForCredentials(loginEmail, loginPassword, selectedAuthRole);
                 }}
                 className={`space-y-4 pt-1 ${language === 'ar' ? 'text-right' : 'text-left'}`}
                 id="login-form-element"
+                autoComplete="off"
               >
                 {/* Email address */}
                 <div className="space-y-1">
@@ -1094,6 +1095,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   <input
                     type="email"
                     required
+                    autoComplete="off"
+                    name="moe_login_email_field"
                     value={loginEmail}
                     onChange={(e) => setLoginEmail(e.target.value)}
                     className={`w-full px-3.5 py-3 text-xs text-slate-800 border border-slate-200 rounded-xl focus:outline-none focus:border-[#0b5e32] focus:ring-1 focus:ring-[#0b5e32]/30 font-bold animate-in fade-in ${language === 'ar' ? 'text-right dir-ltr' : 'text-left'}`}
@@ -1108,6 +1111,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   <input
                     type="password"
                     required
+                    autoComplete="new-password"
+                    name="moe_login_pass_field"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}
                     className={`w-full px-3.5 py-3 text-xs text-slate-800 border border-slate-200 rounded-xl focus:outline-none focus:border-[#0b5e32] focus:ring-1 focus:ring-[#0b5e32]/30 font-bold ${language === 'ar' ? 'text-right dir-ltr' : 'text-left'}`}
