@@ -1101,6 +1101,26 @@ function isSameSchoolLocal(school1?: string, school2?: string): boolean {
   return s1.includes(s2) || s2.includes(s1);
 }
 
+function deduplicateFormsByTeacher(forms: ArchivedForm[]): ArchivedForm[] {
+  const map = new Map<string, ArchivedForm>();
+  for (const form of forms) {
+    const teacherKey = (form.teacherName || form.teacherFileNo || 'unknown_teacher').trim().toLowerCase();
+    const schoolKey = (form.schoolName || 'unknown_school').trim().toLowerCase();
+    const key = `${schoolKey}_${teacherKey}`;
+    if (!map.has(key)) {
+      map.set(key, form);
+    } else {
+      const existing = map.get(key)!;
+      if ((form.isSigned || form.isExaminerSigned) && !(existing.isSigned || existing.isExaminerSigned)) {
+        map.set(key, form);
+      } else if (form.createdAt > existing.createdAt) {
+        map.set(key, form);
+      }
+    }
+  }
+  return Array.from(map.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
 export async function getArchivedForms(userProfileOrId?: UserProfile | string): Promise<ArchivedForm[]> {
   const isProfile = userProfileOrId && typeof userProfileOrId === 'object' && 'role' in userProfileOrId;
   const profileDetails = isProfile ? (userProfileOrId as UserProfile) : null;
@@ -1110,28 +1130,33 @@ export async function getArchivedForms(userProfileOrId?: UserProfile | string): 
     const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
     if (profileDetails && profileDetails.role === 'school') {
       if (profileDetails.roleType === 'administrative') {
-        return archives.filter(a => 
+        const filtered = archives.filter(a => 
           a.schoolId === profileDetails.uid || 
           isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        );
+        return deduplicateFormsByTeacher(filtered);
       }
       if (profileDetails.roleType === 'teacher') {
-        return archives.filter(a => 
+        const filtered = archives.filter(a => 
           a.schoolId === profileDetails.uid ||
           (a.teacherFileNo && profileDetails.phoneNumber && a.teacherFileNo === profileDetails.phoneNumber) ||
           (profileDetails.name && a.teacherName && (a.teacherName.trim().includes(profileDetails.name.trim()) || profileDetails.name.trim().includes(a.teacherName.trim()))) ||
           isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        );
+        return deduplicateFormsByTeacher(filtered);
       }
-      return archives.filter(a => a.schoolId === profileDetails.uid).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const filtered = archives.filter(a => a.schoolId === profileDetails.uid);
+      return deduplicateFormsByTeacher(filtered);
     } else if (profileDetails && profileDetails.role === 'moderator') {
-      return archives.filter(a => 
+      const filtered = archives.filter(a => 
         isSubjectMatch(profileDetails.subject, a.subject || a.subjectName)
-      ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      );
+      return deduplicateFormsByTeacher(filtered);
     } else if (passedId) {
-      return archives.filter(a => a.schoolId === passedId).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const filtered = archives.filter(a => a.schoolId === passedId);
+      return deduplicateFormsByTeacher(filtered);
     }
-    return archives.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return deduplicateFormsByTeacher(archives);
   }
 
   const path = 'archived_forms';
@@ -1206,29 +1231,33 @@ export async function getArchivedForms(userProfileOrId?: UserProfile | string): 
 
     if (profileDetails && profileDetails.role === 'school') {
       if (profileDetails.roleType === 'administrative') {
-        return results.filter(a => 
+        const filtered = results.filter(a => 
           a.schoolId === profileDetails.uid || 
           isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        );
+        return deduplicateFormsByTeacher(filtered);
       }
       if (profileDetails.roleType === 'teacher') {
-        return results.filter(a => 
+        const filtered = results.filter(a => 
           a.schoolId === profileDetails.uid ||
           (a.teacherFileNo && profileDetails.phoneNumber && a.teacherFileNo === profileDetails.phoneNumber) ||
           (profileDetails.name && a.teacherName && (a.teacherName.trim().includes(profileDetails.name.trim()) || profileDetails.name.trim().includes(a.teacherName.trim()))) ||
           isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        );
+        return deduplicateFormsByTeacher(filtered);
       }
-      return results.filter(a => a.schoolId === profileDetails.uid).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const filtered = results.filter(a => a.schoolId === profileDetails.uid);
+      return deduplicateFormsByTeacher(filtered);
     }
 
     if (profileDetails && profileDetails.role === 'moderator') {
-      return results.filter(a => 
+      const filtered = results.filter(a => 
         isSubjectMatch(profileDetails.subject, a.subject || a.subjectName)
-      ).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      );
+      return deduplicateFormsByTeacher(filtered);
     }
 
-    return results.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return deduplicateFormsByTeacher(results);
   } catch (error) {
     handleFirestoreError(error, OperationType.LIST, path);
     return [];
