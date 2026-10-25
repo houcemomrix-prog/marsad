@@ -531,7 +531,7 @@ export function SchoolArchiveView({
       }
 
       // Examiner hierarchical drill-down (School -> Teachers -> Uploads)
-      if (userProfile?.role === 'moderator' || userProfile?.roleType === 'moderator') {
+      if (userProfile?.role === 'moderator') {
         if (selectedExaminerSchool && form.schoolName !== selectedExaminerSchool) return false;
         if (selectedExaminerTeacher && (form.teacherName || form.schoolEmail || 'معلم المادة') !== selectedExaminerTeacher) return false;
       }
@@ -863,7 +863,7 @@ export function SchoolArchiveView({
             </div>
 
             {/* Examiner Hierarchical Drill-Down Navigation (School -> Teachers) */}
-            {(userProfile?.role === 'moderator' || userProfile?.roleType === 'moderator') && (
+            {userProfile?.role === 'moderator' && (
               <div className="bg-gradient-to-br from-slate-900 via-[#1b3b2b] to-[#0a4d28] rounded-2xl p-4 text-white shadow-md space-y-3.5 text-right" dir="rtl">
                 <div className="flex items-center justify-between pb-2 border-b border-white/10">
                   <div className="flex items-center gap-2">

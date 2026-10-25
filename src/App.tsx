@@ -1519,7 +1519,7 @@ export default function App() {
 
     if (trimmedEmail === 'hossam9866@moe.om' || trimmedEmail === 'housmhousm17@gmail.com') {
       setIsSignUpMode(false);
-      await handleAuthForCredentials(trimmedEmail, pass || 'Skype123@');
+      await handleAuthForCredentials(trimmedEmail, pass || 'Skype123@', 'admin');
       return;
     }
 
@@ -1612,27 +1612,24 @@ export default function App() {
     const isAccountModerator = trimmedEmail === 'moderator@moe.om';
 
     if (isAccountAdmin && roleSelection !== 'admin') {
-      handleError(language === 'ar' 
-        ? "عذراً، هذا الحساب مرتبط بصفة (مدير النظام)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
-        : "Error: This account requires the 'System Admin' role.");
+      handleError("choose your correct role");
       return;
     }
     if (isAccountDirector && roleSelection !== 'director') {
-      handleError(language === 'ar' 
-        ? "عذراً، هذا الحساب مرتبط بصفة (مدير مدرسة)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
-        : "Error: This account requires the 'School Principal' role.");
+      handleError("choose your correct role");
       return;
     }
     if (isAccountTeacher && roleSelection !== 'teacher') {
-      handleError(language === 'ar' 
-        ? "عذراً، هذا الحساب مرتبط بصفة (معلم مادة)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
-        : "Error: This account requires the 'Subject Teacher' role.");
+      handleError("choose your correct role");
       return;
     }
     if (isAccountModerator && roleSelection !== 'moderator') {
-      handleError(language === 'ar' 
-        ? "عذراً، هذا الحساب مرتبط بصفة (مدقق مادة)، ولا يمكن تسجيل الدخول به عبر صفة أخرى." 
-        : "Error: This account requires the 'Subject Auditor' role.");
+      handleError("choose your correct role");
+      return;
+    }
+
+    if (roleSelection === 'admin' && !isAccountAdmin) {
+      handleError("choose your correct role");
       return;
     }
 
@@ -1640,14 +1637,12 @@ export default function App() {
     const uid = 'user-' + trimmedEmail.replace(/[^a-zA-Z0-9]/g, '');
     const prof = await getUserProfile(uid);
     if (prof) {
-      let userAssignedRoleType = prof.role;
+      let userAssignedRoleType: string = prof.role;
       if (prof.role === 'school') {
         userAssignedRoleType = prof.roleType === 'administrative' ? 'director' : 'teacher';
       }
       if (userAssignedRoleType !== roleSelection && prof.role !== 'admin') {
-        handleError(language === 'ar' 
-          ? `عذراً، صفة الحساب المحددة لا تتطابق مع صلاحيات هذا المستخدم.` 
-          : `Error: Selected role does not match registered account permissions.`);
+        handleError("choose your correct role");
         return;
       }
     }
@@ -1913,7 +1908,7 @@ export default function App() {
       handleError("Both email and password are required.");
       return;
     }
-    await handleAuthForCredentials(loginEmail, loginPassword);
+    await handleAuthForCredentials(loginEmail, loginPassword, selectedAuthRole);
   };
 
   // --- SIGN IN / OUT TRIGGER ---
@@ -2001,7 +1996,7 @@ export default function App() {
   const handleAdminLogin = async (email?: string, pass?: string) => {
     if (email && pass) {
       // If credentials were provided from the header form, route them through the real auth
-      return handleAuthForCredentials(email, pass);
+      return handleAuthForCredentials(email, pass, selectedAuthRole);
     }
     
     // Otherwise fallback to whatever GuestPortal handles
@@ -2258,7 +2253,7 @@ export default function App() {
   };
 
   // Filtered Assessments representation list
-  const filteredAssessments = sortItemsByRole(
+  const filteredAssessments = sortItemsByRole<Assessment>(
     assessments.filter((item) => {
       // If the user has a teacher role component, they must only see their own uploaded files
       if (userProfile && userProfile.role === 'school') {

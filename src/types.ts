@@ -32,6 +32,7 @@ export interface Assessment {
   schoolId: string;
   schoolName: string;
   schoolEmail: string;
+  teacherName?: string;
   moderatorId?: string | null;
   moderatorName?: string | null;
   feedback?: string | null;
@@ -73,11 +74,14 @@ export interface ArchivedForm {
   id: string;
   assessmentId: string;
   assessmentTitle: string;
+  title?: string;
+  type?: 'test' | 'quiz' | string;
   assessmentType: 'test' | 'quiz';
   grade: string;
   subject: string;
   schoolName: string;
   schoolId: string;
+  schoolEmail?: string;
   
   teacherName: string;
   teacherFileNo: string;

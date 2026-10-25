@@ -706,10 +706,13 @@ export function Header({
                   }}
                   className="flex items-center gap-1.5 animate-in slide-in-from-right duration-250 font-sans"
                   dir={language === 'ar' ? 'rtl' : 'ltr'}
+                  autoComplete="off"
                 >
                   <input
                     type="email"
                     required
+                    autoComplete="off"
+                    name="header_uniquemail_field"
                     value={adminEmail}
                     onChange={(e) => setAdminEmail(e.target.value)}
                     placeholder={language === 'ar' ? 'البريد الإلكتروني' : 'Email address'}
@@ -718,6 +721,8 @@ export function Header({
                   <input
                     type="password"
                     required
+                    autoComplete="new-password"
+                    name="header_uniquepass_field"
                     value={adminPassword}
                     onChange={(e) => setAdminPassword(e.target.value)}
                     placeholder={language === 'ar' ? 'كلمة السر' : 'Password'}
@@ -771,8 +776,8 @@ export function Header({
                   type="button"
                   onClick={() => {
                     setShowAdminLoginForm(true);
-                    setAdminEmail('hossam9866@moe.om');
-                    setAdminPassword('Skype123@');
+                    setAdminEmail('');
+                    setAdminPassword('');
                   }}
                   className="px-3.5 py-2 bg-[#0a4d28] hover:bg-[#126b3a] text-white rounded-xl text-xs font-bold transition-all cursor-pointer border border-white/10 shadow-sm flex items-center gap-1.5"
                 >
