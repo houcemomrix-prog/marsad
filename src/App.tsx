@@ -1995,11 +1995,12 @@ export default function App() {
 
   const handleAdminLogin = async (email?: string, pass?: string) => {
     if (email && pass) {
-      // If credentials were provided from the header form, route them through the real auth
-      return handleAuthForCredentials(email, pass, selectedAuthRole);
+      // If credentials were provided from the header form, route them through the admin auth
+      return handleAuthForCredentials(email, pass, 'admin');
     }
     
     // Otherwise fallback to whatever GuestPortal handles
+    setSelectedAuthRole('admin');
     setGuestView('admin-portal');
   };
 
