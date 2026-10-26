@@ -439,7 +439,7 @@ export const SchoolsDatabaseView: React.FC<SchoolsDatabaseViewProps> = ({ langua
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 font-sans max-h-[800px] overflow-y-auto pr-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 font-sans">
           {filteredSchools.map((school, index) => {
             const isDeletingThis = confirmDeleteId === school.id;
             

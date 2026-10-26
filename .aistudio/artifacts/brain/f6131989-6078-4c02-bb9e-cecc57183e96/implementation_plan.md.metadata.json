@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation plan for official A4 Landscape PDF export modal, print iframe engine, direct download link fallback, and Ministry-branded inspection form.",
-  "updatedAt":  "2026-10-21T20:39:58.238541865Z",
+  "summary":  "Implementation plan for edge-to-edge full width layout in InspectionPlanManager and related views without side padding or clipped table columns.",
+  "updatedAt":  "2026-10-26T08:52:53.790312682Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

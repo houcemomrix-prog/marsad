@@ -266,7 +266,7 @@ export function SignatureVerifierView({ archivedForms, language }: SignatureVeri
               </p>
             </div>
 
-            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+            <div className="space-y-2">
               {signedForms.length === 0 ? (
                 <div className="text-center py-10 border border-dashed border-slate-150 rounded-2xl text-slate-400 text-[11px] font-sans">
                   {language === 'ar' ? 'لا توجود استمارات موقّعة حالياً للأرشفة.' : 'No signed records reported in ledger logs yet.'}

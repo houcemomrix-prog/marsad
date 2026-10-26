@@ -127,10 +127,83 @@ export default function App() {
     }
   }, [theme]);
 
-  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [activeTab, setActiveTab] = useState<'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases'>('overview');
-  const [adminTab, setAdminTab] = useState<'catalog' | 'stats' | 'plan' | 'database' | 'schools' | 'subjects' | 'stamps' | 'signatures' | 'design'>('stats');
-  const [principalTab, setPrincipalTab] = useState<'staff' | 'catalog' | 'archive'>('staff');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(() => {
+    try {
+      const activeRaw = localStorage.getItem('oman_moe_active_user') || localStorage.getItem('oman_moe_mss_user');
+      if (activeRaw) {
+        const parsed = JSON.parse(activeRaw);
+        if (parsed && (parsed.email || parsed.uid)) {
+          if (isDualRoleAccount(parsed)) {
+            if (!parsed.name || parsed.name.includes('خالد العامري')) {
+              parsed.name = 'أ. حسام عمري';
+            }
+            const savedHossamRole = localStorage.getItem('oman_moe_hossam_role') as UserRole;
+            if (savedHossamRole === 'moderator') {
+              parsed.role = 'moderator';
+              parsed.jobTitle = 'فاحص ومعتمد اللغة الإنجليزية';
+              parsed.subject = 'English Language';
+            } else if (savedHossamRole === 'admin') {
+              parsed.role = 'admin';
+              parsed.jobTitle = 'مدير النظام';
+            }
+          }
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed reading initial cached user session:", e);
+    }
+    return null;
+  });
+
+  const [activeTab, setActiveTab] = useState<'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases'>(() => {
+    try {
+      const saved = localStorage.getItem('oman_moe_active_tab');
+      if (saved && ['overview', 'exams', 'results', 'standards', 'settings', 'archive', 'databases'].includes(saved)) {
+        return saved as any;
+      }
+    } catch {}
+    return 'overview';
+  });
+
+  const [adminTab, setAdminTab] = useState<'catalog' | 'stats' | 'plan' | 'database' | 'schools' | 'subjects' | 'stamps' | 'signatures' | 'design'>(() => {
+    try {
+      const saved = localStorage.getItem('oman_moe_admin_tab');
+      if (saved && ['catalog', 'stats', 'plan', 'database', 'schools', 'subjects', 'stamps', 'signatures', 'design'].includes(saved)) {
+        return saved as any;
+      }
+    } catch {}
+    return 'stats';
+  });
+
+  const [principalTab, setPrincipalTab] = useState<'staff' | 'catalog' | 'archive'>(() => {
+    try {
+      const saved = localStorage.getItem('oman_moe_principal_tab');
+      if (saved && ['staff', 'catalog', 'archive'].includes(saved)) {
+        return saved as any;
+      }
+    } catch {}
+    return 'staff';
+  });
+
+  // Preserve user session and active tabs across page refreshes
+  useEffect(() => {
+    if (userProfile) {
+      localStorage.setItem('oman_moe_active_user', JSON.stringify(userProfile));
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
+    localStorage.setItem('oman_moe_active_tab', activeTab);
+  }, [activeTab]);
+
+  useEffect(() => {
+    localStorage.setItem('oman_moe_admin_tab', adminTab);
+  }, [adminTab]);
+
+  useEffect(() => {
+    localStorage.setItem('oman_moe_principal_tab', principalTab);
+  }, [principalTab]);
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [archivedForms, setArchivedForms] = useState<ArchivedForm[]>([]);
@@ -1193,29 +1266,41 @@ export default function App() {
 
   // --- Initialize Sandbox / Load User data ---
   useEffect(() => {
-    // Priority 1: Check if there is an active Microsoft SSO session in local storage
-    const mssUserRaw = localStorage.getItem('oman_moe_mss_user');
-    if (mssUserRaw) {
+    // Priority 1: Check if there is an active session in local storage (MSS or credentials/demo)
+    const activeUserRaw = localStorage.getItem('oman_moe_active_user') || localStorage.getItem('oman_moe_mss_user');
+    if (activeUserRaw) {
       try {
-        const mssProfile = JSON.parse(mssUserRaw);
-        if (isDualRoleAccount(mssProfile)) {
-          if (!mssProfile.name || mssProfile.name.includes('خالد العامري')) {
-            mssProfile.name = 'أ. حسام عمري';
+        const storedProfile = JSON.parse(activeUserRaw);
+        if (storedProfile && (storedProfile.email || storedProfile.uid)) {
+          if (isDualRoleAccount(storedProfile)) {
+            if (!storedProfile.name || storedProfile.name.includes('خالد العامري')) {
+              storedProfile.name = 'أ. حسام عمري';
+            }
+            const savedHossamRole = localStorage.getItem('oman_moe_hossam_role') as UserRole;
+            if (savedHossamRole === 'moderator') {
+              storedProfile.role = 'moderator';
+              storedProfile.jobTitle = 'فاحص ومعتمد اللغة الإنجليزية';
+              storedProfile.subject = 'English Language';
+            } else if (savedHossamRole === 'admin') {
+              storedProfile.role = 'admin';
+              storedProfile.jobTitle = 'مدير النظام';
+            }
           }
-          const savedHossamRole = localStorage.getItem('oman_moe_hossam_role') as UserRole;
-          if (savedHossamRole === 'moderator') {
-            mssProfile.role = 'moderator';
-            mssProfile.jobTitle = 'فاحص ومعتمد اللغة الإنجليزية';
-            mssProfile.subject = 'English Language';
-          } else if (savedHossamRole === 'admin') {
-            mssProfile.role = 'admin';
-            mssProfile.jobTitle = 'مدير النظام';
+          setUserProfile(storedProfile);
+          if (storedProfile.uid) {
+            if (profileUnsubscribeRef.current) {
+              profileUnsubscribeRef.current();
+            }
+            const unsub = subscribeToUserProfile(storedProfile.uid, (updatedProf) => {
+              if (updatedProf) {
+                setUserProfile(updatedProf);
+              }
+            });
+            profileUnsubscribeRef.current = unsub;
           }
         }
-        setUserProfile(mssProfile);
-        return;
       } catch (err) {
-        console.error("Failed parsing MSS user session:", err);
+        console.error("Failed parsing stored active user session:", err);
       }
     }
 
@@ -1236,6 +1321,8 @@ export default function App() {
             if (!isAuthorizedEmail) {
               setErrorMessage("Access Denied. You must sign in with a verified @moe.om email address.");
               await signOut(auth);
+              localStorage.removeItem('oman_moe_active_user');
+              localStorage.removeItem('oman_moe_mss_user');
               setUserProfile(null);
             } else {
               const prof = await getUserProfile(user.uid);
@@ -1266,6 +1353,8 @@ export default function App() {
             if (!isAuthorizedEmail) {
               setErrorMessage("Access Denied. You must sign in with a verified @moe.om email address.");
               await signOut(auth);
+              localStorage.removeItem('oman_moe_active_user');
+              localStorage.removeItem('oman_moe_mss_user');
               setUserProfile(null);
               if (profileUnsubscribeRef.current) {
                 profileUnsubscribeRef.current();
@@ -1330,6 +1419,19 @@ export default function App() {
             profileUnsubscribeRef.current();
             profileUnsubscribeRef.current = null;
           }
+          // Do NOT log out on browser page refresh if an active user session exists in localStorage
+          const cachedActiveUser = localStorage.getItem('oman_moe_active_user') || localStorage.getItem('oman_moe_mss_user');
+          if (cachedActiveUser) {
+            try {
+              const parsed = JSON.parse(cachedActiveUser);
+              if (parsed && (parsed.email || parsed.uid)) {
+                setAuthLoading(false);
+                return;
+              }
+            } catch (err) {
+              console.error("Error parsing cached active user on auth state change:", err);
+            }
+          }
           setUserProfile(null);
           setAssessments([]);
           setCurrentAssessment(null);
@@ -1348,14 +1450,26 @@ export default function App() {
     }
   }, [sandbox]);
 
+  const prevUserUidRef = useRef<string | null>(userProfile?.uid || null);
+
   // --- Reload Assessments when active profile changes ---
   useEffect(() => {
-    setActiveTab('overview');
-    setAdminTab('stats');
-    setPrincipalTab('staff');
-    setCurrentAssessment(null);
-    setShowUploadForm(false);
-    setSelectedStatus('');
+    if (!userProfile) {
+      prevUserUidRef.current = null;
+      return;
+    }
+
+    // Only reset tabs when switching between DIFFERENT user accounts, never on page refresh
+    if (prevUserUidRef.current && prevUserUidRef.current !== userProfile.uid) {
+      setActiveTab('overview');
+      setAdminTab('stats');
+      setPrincipalTab('staff');
+      setCurrentAssessment(null);
+      setShowUploadForm(false);
+      setSelectedStatus('');
+    }
+    prevUserUidRef.current = userProfile.uid;
+
     if (userProfile) {
       fetchAssessmentList();
       fetchArchivedFormsList();
@@ -2015,18 +2129,26 @@ export default function App() {
   };
 
   const handleSignOut = async () => {
+    localStorage.removeItem('oman_moe_active_user');
     localStorage.removeItem('oman_moe_mss_user');
+    localStorage.removeItem('oman_moe_active_tab');
+    localStorage.removeItem('oman_moe_admin_tab');
+    localStorage.removeItem('oman_moe_principal_tab');
+    if (profileUnsubscribeRef.current) {
+      profileUnsubscribeRef.current();
+      profileUnsubscribeRef.current = null;
+    }
     if (sandbox) {
       setUserProfile(null);
       handleSuccess("Sandbox session cleared.");
     } else {
       try {
         await signOut(auth);
-        setUserProfile(null);
-        handleSuccess("Successfully signed out from your MOE portal account.");
       } catch (err) {
-        handleError("Failed to process sign out.");
+        console.warn("Sign out err:", err);
       }
+      setUserProfile(null);
+      handleSuccess("Successfully signed out from your MOE portal account.");
     }
   };
 
@@ -2601,14 +2723,14 @@ export default function App() {
 
             {/* Admin navigation override - Stats Tab Selector */}
             {userProfile.role === 'admin' && (
-              <div className="flex overflow-x-auto no-scrollbar bg-slate-100 rounded-xl sm:rounded-2xl p-1 max-w-3xl mx-auto border border-slate-200/60 shadow-xs gap-1 font-sans animate-in fade-in duration-150">
+              <div className="w-full flex items-center justify-between bg-slate-100 rounded-2xl p-1.5 border border-slate-200/70 shadow-xs gap-1.5 font-sans animate-in fade-in duration-150">
                 <button
                   type="button"
                   onClick={() => setAdminTab('stats')}
-                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                  className={`flex-1 py-2.5 px-2.5 rounded-xl text-xs sm:text-[12.5px] font-extrabold text-center whitespace-nowrap transition-all cursor-pointer ${
                     adminTab === 'stats' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   {language === 'ar' ? '📊 المتابعة والتحليلات' : '📊 Analytics'}
@@ -2616,10 +2738,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminTab('plan')}
-                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                  className={`flex-1 py-2.5 px-2.5 rounded-xl text-xs sm:text-[12.5px] font-extrabold text-center whitespace-nowrap transition-all cursor-pointer ${
                     adminTab === 'plan' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   {language === 'ar' ? '📅 خطة الفحص والصلاحيات' : '📅 Inspection Plan & Permissions'}
@@ -2627,10 +2749,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminTab('database')}
-                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                  className={`flex-1 py-2.5 px-2.5 rounded-xl text-xs sm:text-[12.5px] font-extrabold text-center whitespace-nowrap transition-all cursor-pointer ${
                     adminTab === 'database' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   {language === 'ar' ? '👥 المستخدمين' : '👥 Users'}
@@ -2638,10 +2760,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminTab('schools')}
-                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                  className={`flex-1 py-2.5 px-2.5 rounded-xl text-xs sm:text-[12.5px] font-extrabold text-center whitespace-nowrap transition-all cursor-pointer ${
                     adminTab === 'schools' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   {language === 'ar' ? '🏢 المدارس' : '🏢 Schools'}
@@ -2649,10 +2771,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminTab('stamps')}
-                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                  className={`flex-1 py-2.5 px-2.5 rounded-xl text-xs sm:text-[12.5px] font-extrabold text-center whitespace-nowrap transition-all cursor-pointer ${
                     adminTab === 'stamps' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   {language === 'ar' ? '💮 أختام المدارس' : '💮 Stamps'}
@@ -2660,10 +2782,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminTab('signatures')}
-                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                  className={`flex-1 py-2.5 px-2.5 rounded-xl text-xs sm:text-[12.5px] font-extrabold text-center whitespace-nowrap transition-all cursor-pointer ${
                     adminTab === 'signatures' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   {language === 'ar' ? '🔑 تحقق التواقيع' : '🔑 Check Signatures'}
@@ -2671,10 +2793,10 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => setAdminTab('design')}
-                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                  className={`flex-1 py-2.5 px-2.5 rounded-xl text-xs sm:text-[12.5px] font-extrabold text-center whitespace-nowrap transition-all cursor-pointer ${
                     adminTab === 'design' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
                   }`}
                 >
                   {language === 'ar' ? '🎨 تنسيق الاستمارة' : '🎨 Form Style'}
@@ -2763,7 +2885,7 @@ export default function App() {
             {userProfile.role === 'admin' && adminTab === 'stats' ? (
               <AdminStatsDashboard assessments={assessments} language={language} />
             ) : userProfile.role === 'admin' && adminTab === 'plan' ? (
-              <div className="max-w-7xl mx-auto space-y-6">
+              <div className="w-full space-y-6">
                 <InspectionPlanManager 
                   userProfile={userProfile} 
                   assessments={assessments} 
@@ -2778,22 +2900,22 @@ export default function App() {
             ) : userProfile.role === 'admin' && adminTab === 'schools' ? (
               <SchoolsDatabaseView language={language} />
             ) : userProfile.role === 'admin' && adminTab === 'stamps' ? (
-              <div className="max-w-7xl mx-auto space-y-6">
+              <div className="w-full space-y-6">
                 <SchoolStampsManager language={language} />
               </div>
             ) : userProfile.role === 'admin' && adminTab === 'signatures' ? (
-              <div className="max-w-7xl mx-auto space-y-6">
+              <div className="w-full space-y-6">
                 <SignatureVerifierView 
                   archivedForms={archivedForms} 
                   language={language} 
                 />
               </div>
             ) : userProfile.role === 'admin' && adminTab === 'design' ? (
-              <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-150">
+              <div className="w-full space-y-6 animate-in fade-in zoom-in-95 duration-150">
                 <FormStyleController language={language} onSuccess={handleSuccess} />
               </div>
             ) : userProfile.role === 'school' && userProfile.roleType === 'administrative' && principalTab === 'staff' ? (
-              <div className="max-w-6xl mx-auto space-y-6">
+              <div className="w-full space-y-6">
                 <SchoolPrincipalObserver
                   userProfile={userProfile}
                   assessments={assessments}
@@ -2808,7 +2930,7 @@ export default function App() {
                 />
               </div>
             ) : userProfile.role === 'school' && principalTab === 'archive' ? (
-              <div className="max-w-7xl mx-auto space-y-6">
+              <div className="w-full space-y-6">
                 <SchoolArchiveView
                   archivedForms={archivedForms}
                   language={language}

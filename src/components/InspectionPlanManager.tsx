@@ -167,10 +167,10 @@ export function InspectionPlanManager({
   );
 
   return (
-    <div className="space-y-8 font-sans" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="w-full space-y-12 font-sans px-0 py-4" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       
       {/* 5-STEP LIFECYCLE HEADER BANNER */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-6 rounded-3xl border border-indigo-900/50 shadow-xl space-y-4">
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white p-8 sm:p-12 rounded-3xl border border-indigo-900/50 shadow-2xl space-y-8 w-full min-h-[320px]">
         <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 border-b border-indigo-800/40 pb-4">
           <div>
             <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2.5 py-0.5 rounded-full uppercase tracking-wider">
@@ -283,41 +283,41 @@ export function InspectionPlanManager({
       )}
 
       {/* STEP 1 & 2 SEARCH AND PERMISSIONS TABLE */}
-      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-5 space-y-4">
-        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
-          <div className="space-y-0.5">
-            <h3 className="font-extrabold text-slate-900 text-sm font-heading flex items-center gap-2">
-              <Building2 className="w-4.5 h-4.5 text-indigo-600" />
+      <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xl p-8 sm:p-12 space-y-8 w-full min-h-[1200px]">
+        <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 border-b border-slate-100 pb-6">
+          <div className="space-y-1.5">
+            <h3 className="font-extrabold text-slate-900 text-lg font-heading flex items-center gap-2.5">
+              <Building2 className="w-6 h-6 text-indigo-600" />
               {language === 'ar' ? 'فتح الصلاحيات' : 'Grant & Open Permissions'}
             </h3>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-sm text-slate-500 font-medium">
               {language === 'ar' ? 'قم بتحديد تاريخ الفحص لكل مدرسة، ثم افتح صلاحية الرفع للمدرسة في موعد الفحص الخاص بها.' : 'Set inspection dates per school and unlock upload access on inspection day.'}
             </p>
           </div>
 
-          <div className="relative w-full md:w-72">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <div className="relative w-full md:w-96">
+            <Search className="w-4.5 h-4.5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               placeholder={language === 'ar' ? 'البحث باسم المدرسة...' : 'Filter schools...'}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-8 pr-3 py-2 border border-slate-200 rounded-xl text-xs bg-slate-50 focus:outline-none focus:border-indigo-600"
+              className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-2xl text-sm bg-slate-50 focus:outline-none focus:border-indigo-600 font-medium shadow-xs"
             />
           </div>
         </div>
 
         {/* SCHOOLS PERMISSION GRID / TABLE */}
-        <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs">
+        <div className="border border-slate-200/90 rounded-2xl overflow-hidden shadow-2xs">
           <div className="overflow-x-auto">
-            <table className="w-full text-xs text-right border-collapse">
+            <table className="w-full text-sm text-right border-collapse">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase text-[10px]">
-                  <th className="py-3 px-4 text-right">{language === 'ar' ? 'المدرسة / المؤسسة التعليمية' : 'School'}</th>
-                  <th className="py-3 px-4 text-center">{language === 'ar' ? 'تاريخ الفحص المحدد (الخطوة 1)' : 'Inspection Date (Step 1)'}</th>
-                  <th className="py-3 px-4 text-center">{language === 'ar' ? 'صلاحية مدير النظام (الخطوة 2a)' : 'Admin Unlock (Step 2a)'}</th>
-                  <th className="py-3 px-4 text-center">{language === 'ar' ? 'صلاحية مدير المدرسة للمعلمين (الخطوة 2b)' : 'Principal Unlock (Step 2b)'}</th>
-                  <th className="py-3 px-4 text-center">{language === 'ar' ? 'حالة إمكانية رفع المعلمين' : 'Teacher Upload Status'}</th>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-black uppercase text-xs">
+                  <th className="py-6 px-8 text-right">{language === 'ar' ? 'المدرسة / المؤسسة التعليمية' : 'School'}</th>
+                  <th className="py-6 px-8 text-center">{language === 'ar' ? 'تاريخ الفحص المحدد (الخطوة 1)' : 'Inspection Date (Step 1)'}</th>
+                  <th className="py-6 px-8 text-center">{language === 'ar' ? 'صلاحية مدير النظام (الخطوة 2a)' : 'Admin Unlock (Step 2a)'}</th>
+                  <th className="py-6 px-8 text-center">{language === 'ar' ? 'صلاحية مدير المدرسة للمعلمين (الخطوة 2b)' : 'Principal Unlock (Step 2b)'}</th>
+                  <th className="py-6 px-8 text-center">{language === 'ar' ? 'حالة إمكانية رفع المعلمين' : 'Teacher Upload Status'}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
@@ -331,32 +331,32 @@ export function InspectionPlanManager({
                   const inspDate = plan?.inspectionDate || 'غير محدد';
 
                   return (
-                    <tr key={schName} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="py-3.5 px-4 font-bold text-slate-800">
+                    <tr key={schName} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="py-5 px-6 font-extrabold text-slate-900 text-sm">
                         {schName}
                       </td>
 
                       {/* Step 1 Date Column */}
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-5 px-6 text-center">
                         {isEditing ? (
-                          <div className="flex items-center justify-center gap-1.5">
+                          <div className="flex items-center justify-center gap-2">
                             <input
                               type="date"
                               value={editDate}
                               onChange={(e) => setEditDate(e.target.value)}
-                              className="px-2 py-1 border border-indigo-400 rounded-lg text-xs font-bold bg-white"
+                              className="px-3 py-1.5 border border-indigo-400 rounded-xl text-xs font-bold bg-white"
                             />
                             <button
                               type="button"
                               onClick={() => handleSaveDate(schName)}
-                              className="px-2 py-1 bg-indigo-600 text-white rounded-lg text-[10px] font-bold cursor-pointer"
+                              className="px-3 py-1.5 bg-indigo-600 text-white rounded-xl text-xs font-bold cursor-pointer"
                             >
                               حفظ
                             </button>
                             <button
                               type="button"
                               onClick={() => setEditingSchool(null)}
-                              className="px-2 py-1 bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer"
+                              className="px-3 py-1.5 bg-slate-200 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
                             >
                               إلغاء
                             </button>
@@ -369,53 +369,53 @@ export function InspectionPlanManager({
                               setEditDate(plan?.inspectionDate || new Date().toISOString().split('T')[0]);
                               setEditNotes(plan?.notes || '');
                             }}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg font-mono font-bold cursor-pointer transition-colors"
+                            className="inline-flex items-center gap-2 px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-mono text-xs font-bold cursor-pointer transition-colors border border-slate-200"
                             title="انقر لتعديل تاريخ الفحص"
                           >
-                            <Calendar className="w-3.5 h-3.5 text-indigo-600" />
+                            <Calendar className="w-4 h-4 text-indigo-600" />
                             <span>{inspDate}</span>
                           </button>
                         )}
                       </td>
 
                       {/* Step 2a Admin Unlock Column */}
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-5 px-6 text-center">
                         <button
                           type="button"
                           onClick={() => handleToggleAdminUnlock(schName, adminUnlocked)}
-                          className={`px-3.5 py-1.5 rounded-xl font-black text-[11px] cursor-pointer transition-all inline-flex items-center gap-1.5 active:scale-95 shadow-2xs ${
+                          className={`px-4 py-2 rounded-xl font-black text-xs cursor-pointer transition-all inline-flex items-center gap-2 active:scale-95 shadow-2xs ${
                             adminUnlocked
                               ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-600/20'
                               : 'bg-rose-600 hover:bg-rose-700 text-white shadow-rose-600/20'
                           }`}
                         >
-                          {adminUnlocked ? <Unlock className="w-3.5 h-3.5 text-white" /> : <Lock className="w-3.5 h-3.5 text-white" />}
+                          {adminUnlocked ? <Unlock className="w-4 h-4 text-white" /> : <Lock className="w-4 h-4 text-white" />}
                           <span>{adminUnlocked ? (language === 'ar' ? 'مفتوحة' : 'Unlocked') : (language === 'ar' ? 'مغلقة' : 'Locked')}</span>
                         </button>
                       </td>
 
                       {/* Step 2b Principal Unlock Column */}
-                      <td className="py-3.5 px-4 text-center">
-                        <span className={`px-2.5 py-1 rounded-lg text-[10.5px] font-bold inline-flex items-center gap-1 ${
+                      <td className="py-5 px-6 text-center">
+                        <span className={`px-3.5 py-1.5 rounded-xl text-xs font-bold inline-flex items-center gap-1.5 ${
                           principalUnlocked
                             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
                             : 'bg-amber-50 text-amber-700 border border-amber-200'
                         }`}>
-                          {principalUnlocked ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Clock className="w-3.5 h-3.5" />}
+                          {principalUnlocked ? <CheckCircle2 className="w-4 h-4" /> : <Clock className="w-4 h-4" />}
                           <span>{principalUnlocked ? (language === 'ar' ? 'مفتوحة للمعلمين' : 'Unlocked') : (language === 'ar' ? 'بانتظار تفعيل المدير' : 'Awaiting Principal')}</span>
                         </span>
                       </td>
 
                       {/* Final Status */}
-                      <td className="py-3.5 px-4 text-center">
+                      <td className="py-5 px-6 text-center">
                         {canTeacherUpload ? (
-                          <span className="bg-emerald-500 text-white font-black text-[10px] px-2.5 py-1 rounded-full inline-flex items-center gap-1 shadow-2xs">
-                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span className="bg-emerald-500 text-white font-black text-xs px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 shadow-2xs">
+                            <CheckCircle2 className="w-4 h-4" />
                             <span>{language === 'ar' ? 'مسموح برفع المعلمين' : 'Upload Allowed'}</span>
                           </span>
                         ) : (
-                          <span className="bg-slate-100 text-slate-500 font-bold text-[10px] px-2.5 py-1 rounded-full inline-flex items-center gap-1 border border-slate-200">
-                            <Lock className="w-3 h-3 text-slate-400" />
+                          <span className="bg-slate-100 text-slate-500 font-bold text-xs px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 border border-slate-200">
+                            <Lock className="w-3.5 h-3.5 text-slate-400" />
                             <span>{language === 'ar' ? 'الرفع محظور حالياً' : 'Upload Blocked'}</span>
                           </span>
                         )}

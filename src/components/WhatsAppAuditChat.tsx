@@ -253,7 +253,7 @@ export function WhatsAppAuditChat({
   const formattedTeacherName = formattedTeacherNameHelper(teacherName);
 
   return (
-    <div className="flex flex-col h-[82vh] max-h-[850px] bg-[#efeae2] dark:bg-[#0b141a] rounded-3xl border border-slate-300 dark:border-slate-800 shadow-2xl overflow-hidden font-sans relative" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+    <div className="flex flex-col w-full bg-[#efeae2] dark:bg-[#0b141a] rounded-3xl border border-slate-300 dark:border-slate-800 shadow-2xl overflow-hidden font-sans relative" dir={language === 'ar' ? 'rtl' : 'ltr'}>
       
       {/* 🟢 WHATSAPP HEADER */}
       <div className="bg-[#075e54] dark:bg-[#1f2c34] text-white px-3 sm:px-5 py-3 flex items-center justify-between shrink-0 shadow-md z-10">
@@ -300,7 +300,7 @@ export function WhatsAppAuditChat({
 
       {/* 💬 CHAT MESSAGES CANVAS AREA */}
       <div 
-        className="flex-1 overflow-y-auto p-3 sm:p-5 space-y-4 bg-repeat"
+        className="flex-1 p-3 sm:p-5 space-y-4 bg-repeat"
         style={{
           backgroundImage: `radial-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 0)`,
           backgroundSize: '16px 16px'
