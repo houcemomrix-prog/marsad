@@ -77,7 +77,9 @@ import { SchoolPrincipalObserver, isSameSchool } from './components/SchoolPrinci
 import { SchoolArchiveView } from './components/SchoolArchiveView';
 import { FormStyleController } from './components/FormStyleController';
 import { SignatureVerifierView } from './components/SignatureVerifierView';
+import { InspectionPlanManager } from './components/InspectionPlanManager';
 import { GuestPortal } from './components/GuestPortal';
+import { WhatsAppAuditChat } from './components/WhatsAppAuditChat';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import ChangePasswordModal from './components/ChangePasswordModal';
@@ -127,7 +129,7 @@ export default function App() {
 
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases'>('overview');
-  const [adminTab, setAdminTab] = useState<'catalog' | 'stats' | 'database' | 'schools' | 'subjects' | 'stamps' | 'signatures' | 'design'>('stats');
+  const [adminTab, setAdminTab] = useState<'catalog' | 'stats' | 'plan' | 'database' | 'schools' | 'subjects' | 'stamps' | 'signatures' | 'design'>('stats');
   const [principalTab, setPrincipalTab] = useState<'staff' | 'catalog' | 'archive'>('staff');
   const [assessments, setAssessments] = useState<Assessment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -301,6 +303,21 @@ export default function App() {
   const [isArchiving, setIsArchiving] = useState(false);
   const sanitizedStylesRef = useRef<string[]>([]);
   const profileUnsubscribeRef = useRef<(() => void) | null>(null);
+
+  const formatCleanTeacherName = (tName?: string, sEmail?: string): string => {
+    const target = (tName && tName.trim() && !tName.includes('@')) ? tName.trim() : (sEmail && sEmail.trim() ? sEmail.trim() : (tName || ''));
+    if (!target) return 'أ. معلم المادة';
+    const clean = target.trim();
+    if (clean === 'teacher@moe.om') return 'د. فاطمة السيابية';
+    if (clean === 'school@moe.om') return 'أ. وليد الخروصي';
+    if (clean === 'moderator@moe.om') return 'أ. سالم الحارثي';
+    if (clean === 'hossam9866@moe.om' || clean === 'housmhousm17@gmail.com') return 'أ. حسام عمري';
+    if (clean.includes('@')) {
+      const handle = clean.split('@')[0].replace(/[._-]/g, ' ');
+      return `أ. ${handle.charAt(0).toUpperCase() + handle.slice(1)}`;
+    }
+    return clean;
+  };
 
   const sanitizeCssColors = (cssText: string): string => {
     if (!cssText) return '';
@@ -991,8 +1008,49 @@ export default function App() {
     }
   };
 
+  const handleStartAuditFormFromChat = (tName: string, schName: string, subjName: string, targetAss: Assessment | null) => {
+    setAuditTeacherName(tName);
+    setAuditSchool(schName);
+    if (subjName) setAuditSubjectName(subjName);
+    setAuditExaminerName(userProfile?.name || 'أ. حسان بن علي الجنيبي');
+    
+    if (targetAss) {
+      setCurrentAssessment(targetAss);
+    }
+    
+    setReviewFeedback(
+      language === 'ar'
+        ? `تم الاطلاع والتدقيق الشامل على ملف العينات والتقييمات المرفوعة من قِبل المعلم (${tName}). المخرجات مستوفية للشروط الفنية وتوزيع الدرجات معتمد.`
+        : `Reviewed and validated all sample portfolios uploaded by teacher (${tName}).`
+    );
+
+    handleSuccess(
+      language === 'ar'
+        ? `تم فتح استمارة التدقيق المعتمدة للمعلم (${tName}). يمكنك الآن مراجعة المفردات وتحديد حالة المطابقة والاعتماد.`
+        : `Audit form opened for teacher (${tName}). You can now inspect samples and complete accreditation.`
+    );
+
+    setTimeout(() => {
+      const el = document.getElementById('ministry-audit-form-preview') || document.getElementById('auditor-inspection-panel') || document.getElementById('teacher-upload-hub');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }, 150);
+  };
+
+  // Grade Moderation Mode: 'continuous' for Grades 1-11 (No grade modifications, handwritten technical notes) vs 'grade12' for Diploma (Before/After & Reason Codes 1-6)
+  const [auditGradeMode, setAuditGradeMode] = useState<'continuous' | 'grade12'>('continuous');
+  const [auditHandwrittenNotes, setAuditHandwrittenNotes] = useState<string>(
+    '1. كراسات الطلاب وأعمالهم منتظمة والواجبات مصححة أولاً بأول مع وجود نوعية تغذية راجعة هادفة وداعمة للمستوى المعرفي.\n' +
+    '2. أسئلة الاختبارات القصيرة تراعي الفروق الفردية ومصاغة بدقة وفق جداول المواصفات المعتمدة من الوزارة.\n' +
+    '3. رصد درجات أدوات التقويم المستمر متسق مع وثيقة التقويم وموثق بكشوف الرصد والمطابقة المرفقة.\n' +
+    '4. استمرار تفعيل الأنشطة الإثرائية للطلبة المجيدين وتنفيذ الخطط العلاجية الداعمة للطلبة المحتاجين لمتابعة.'
+  );
+
+  const isGrade12 = auditGradeMode === 'grade12';
+
   const [auditStudents, setAuditStudents] = useState([
-    { id: 1, name: 'سالم بن أحمد الجنيبي', gradeClass: '10/1', tool: 'اختبار قصير 1', scoreBefore: '10', scoreAfter: '10', reason: 'لا يوجد' },
+    { id: 1, name: 'سالم بن أحمد الجنيبي', gradeClass: '10/1', tool: 'اختبار قصير 1', scoreBefore: '10', scoreAfter: '10', reason: 'لا يوجد', status: 'مستوفٍ ومطابق للمواصفات' },
     { id: 2, name: 'منى بنت عبدالله الوهيبية', gradeClass: '10/1', tool: 'اختبار قصير 1', scoreBefore: '9', scoreAfter: '9', reason: 'لا يوجد' },
     { id: 3, name: 'سليمان بن علي الجنيبي', gradeClass: '10/1', tool: 'واجب منزلي أول', scoreBefore: '5', scoreAfter: '5', reason: 'لا يوجد' },
     { id: 4, name: 'فاطمة بنت حميد المهرية', gradeClass: '10/1', tool: 'اختبار قصير 2', scoreBefore: '8', scoreAfter: '7', reason: '4' },
@@ -1001,16 +1059,18 @@ export default function App() {
   ]);
 
   const [auditObservations, setAuditObservations] = useState([
-    { id: 1, gradeClass: 'الصف العاشر', tool: 'الاختبار القصير الأول', notes: 'الأسئلة صيغت بوضوح وتراعي المستويات المعرفية الثلاثية مع شمولية لجدول المواصفات المعلم الأول.' },
-    { id: 2, gradeClass: 'الصف العاشر', tool: 'الواجب المنزلي والأعمال', notes: 'كراسة الطالب منظمة والأعمال مصححة أولاً بأول وجود نوعية تغذية مرتدة تدعم علاج الضعف العام.' },
-    { id: 3, gradeClass: 'الصف العاشر', tool: 'الاختبار القصير الثاني', notes: 'جرى تعديل طفيف لعلامة الطالبة رقم (4) لتصويب خطأ شكلي في جمع الدرجات الفرعية بقسم المجموع النهائي.' },
-    { id: 4, gradeClass: 'الصف العاشر', tool: 'التقييم العملي/الأدائي', notes: 'تم توثيق التقديم الشفهي والأداء العملي للمهارات بكشوف رصد ملحقة وواضحة تتبع نموذج وزارة التعليم.' },
+    { id: 1, gradeClass: 'الصف العاشر', tool: 'اختبار قصير 1', notes: 'الأسئلة مصاغة بدقة وتراعي المستويات المعرفية الثلاثية وجداول المواصفات، مع تصحيح دوري وتغذية راجعة هادفة للطلبة.' },
+    { id: 2, gradeClass: 'الصف العاشر', tool: 'عرض شفوي', notes: 'الأعمال والأنشطة مكتملة وموثقة بكشوف رصد ملحقة ومطابقة للأدلة والمعايير المعتمدة من الوزارة.' },
+    { id: 3, gradeClass: 'الصف العاشر', tool: 'سؤال قصير', notes: 'أسئلة قصيرة هادفة ومصححة أولاً بأول مع وجود نوعية توجيهات هادفة وداعمة للمستوى المعرفي.' },
+    { id: 4, gradeClass: 'الصف العاشر', tool: 'واجب منزلي', notes: 'رصد درجات أدوات التقويم المستمر متسق ومطابق للسجلات والبوابة التعليمية دون وجود أية فروقات.' },
   ]);
 
   // Synchronize Audit Form properties with current assessment selection
   useEffect(() => {
     if (currentAssessment) {
       const transSub = translateSubject(currentAssessment.subject, language);
+      const isG12 = currentAssessment.grade === 'Grade 12';
+      setAuditGradeMode(isG12 ? 'grade12' : 'continuous');
       const gradeNum = currentAssessment.grade ? currentAssessment.grade.replace(/[^\d]/g, '') : '10';
       const localizedGradeName = translateGrade(currentAssessment.grade, language);
 
@@ -1299,7 +1359,17 @@ export default function App() {
     if (userProfile) {
       fetchAssessmentList();
       fetchArchivedFormsList();
-      if (userProfile.subject && !isUniversalSubject(userProfile.subject)) {
+      if (userProfile.role === 'moderator') {
+        const auditorSubject = (userProfile.subject && !isUniversalSubject(userProfile.subject)) ? userProfile.subject : 'Mathematics';
+        setSelectedSubject(auditorSubject);
+        setFormSubject(auditorSubject);
+        if (!selectedModeratorSchool) {
+          setSelectedModeratorSchool('مدرسة الدقم للتعليم الأساسي');
+        }
+        if (!selectedModeratorTeacher) {
+          setSelectedModeratorTeacher('د. فاطمة السيابية');
+        }
+      } else if (userProfile.subject && !isUniversalSubject(userProfile.subject)) {
         setSelectedSubject(userProfile.subject);
         setFormSubject(userProfile.subject);
       } else {
@@ -1721,7 +1791,7 @@ export default function App() {
         uid: 'demo-mod-1',
         name: 'أ. سالم الحارثي',
         role: 'moderator',
-        subject: 'All Subjects',
+        subject: 'Mathematics',
         jobTitle: 'مشرف ومدقق تربوي'
       }
     };
@@ -2401,7 +2471,7 @@ export default function App() {
       />
 
       {/* Main body Container */}
-      <main className={`flex-1 max-w-7xl w-full mx-auto p-2.5 sm:p-6 lg:p-8 space-y-4 sm:space-y-7 ${userProfile ? 'pb-24 sm:pb-8' : ''}`}>
+      <main className={`flex-1 w-full max-w-none p-2.5 sm:p-6 lg:p-8 space-y-4 sm:space-y-7 ${userProfile ? 'pb-24 sm:pb-8' : ''}`}>
         
         {/* Error / Success Notifications */}
         <AnimatePresence>
@@ -2531,7 +2601,7 @@ export default function App() {
 
             {/* Admin navigation override - Stats Tab Selector */}
             {userProfile.role === 'admin' && (
-              <div className="flex overflow-x-auto no-scrollbar bg-slate-100 rounded-xl sm:rounded-2xl p-1 max-w-2xl mx-auto border border-slate-200/60 shadow-xs gap-1 font-sans animate-in fade-in duration-150">
+              <div className="flex overflow-x-auto no-scrollbar bg-slate-100 rounded-xl sm:rounded-2xl p-1 max-w-3xl mx-auto border border-slate-200/60 shadow-xs gap-1 font-sans animate-in fade-in duration-150">
                 <button
                   type="button"
                   onClick={() => setAdminTab('stats')}
@@ -2542,6 +2612,17 @@ export default function App() {
                   }`}
                 >
                   {language === 'ar' ? '📊 المتابعة والتحليلات' : '📊 Analytics'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAdminTab('plan')}
+                  className={`shrink-0 sm:flex-1 py-1.5 sm:py-2 px-2.5 sm:px-4 rounded-lg sm:rounded-xl text-[10px] sm:text-[11px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                    adminTab === 'plan' 
+                      ? 'bg-[#0b5e32] text-white shadow-xs' 
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  {language === 'ar' ? '📅 خطة الفحص والصلاحيات' : '📅 Inspection Plan & Permissions'}
                 </button>
                 <button
                   type="button"
@@ -2642,17 +2723,28 @@ export default function App() {
 
             {/* School Teacher navigation tab bar */}
             {userProfile.role === 'school' && userProfile.roleType === 'teacher' && (
-              <div className="flex overflow-x-auto no-scrollbar bg-slate-100 rounded-xl sm:rounded-2xl p-1 max-w-sm mx-auto border border-slate-200/60 shadow-xs gap-1 font-sans animate-in fade-in duration-150 mb-2">
+              <div className="flex overflow-x-auto no-scrollbar bg-slate-100 rounded-xl sm:rounded-2xl p-1 max-w-md mx-auto border border-slate-200/60 shadow-xs gap-1 font-sans animate-in fade-in duration-150 mb-2">
                 <button
                   type="button"
-                  onClick={() => setPrincipalTab('staff')} // staff holds default TeacherUploadsView
+                  onClick={() => setPrincipalTab('staff')}
                   className={`flex-1 py-1.5 px-2.5 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
-                    principalTab !== 'archive' 
+                    principalTab === 'staff' 
                       ? 'bg-[#0b5e32] text-white shadow-xs' 
                       : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
                   }`}
                 >
                   {language === 'ar' ? '📁 بوابة رفع الملفات' : '📁 Uploads Portal'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPrincipalTab('catalog')}
+                  className={`flex-1 py-1.5 px-2.5 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
+                    principalTab === 'catalog' 
+                      ? 'bg-[#0b5e32] text-white shadow-xs' 
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+                  }`}
+                >
+                  {language === 'ar' ? '💬 محادثة التدقيق (واتساب)' : '💬 Audit Chat (WhatsApp)'}
                 </button>
                 <button
                   type="button"
@@ -2670,6 +2762,17 @@ export default function App() {
 
             {userProfile.role === 'admin' && adminTab === 'stats' ? (
               <AdminStatsDashboard assessments={assessments} language={language} />
+            ) : userProfile.role === 'admin' && adminTab === 'plan' ? (
+              <div className="max-w-7xl mx-auto space-y-6">
+                <InspectionPlanManager 
+                  userProfile={userProfile} 
+                  assessments={assessments} 
+                  language={language} 
+                  onSuccess={handleSuccess} 
+                  onError={handleError}
+                  onRefreshAssessments={fetchAssessmentList}
+                />
+              </div>
             ) : userProfile.role === 'admin' && adminTab === 'database' ? (
               <UserDatabaseView language={language} subjects={SUBJECTS} />
             ) : userProfile.role === 'admin' && adminTab === 'schools' ? (
@@ -2701,6 +2804,7 @@ export default function App() {
                     setShowUploadForm(false);
                   }}
                   onSuccess={handleSuccess}
+                  onError={handleError}
                 />
               </div>
             ) : userProfile.role === 'school' && principalTab === 'archive' ? (
@@ -2722,6 +2826,49 @@ export default function App() {
                   }}
                   userProfile={userProfile}
                   onSuccess={handleSuccess}
+                />
+              </div>
+            ) : userProfile.role === 'school' && userProfile.roleType === 'teacher' && principalTab === 'catalog' ? (
+              <div className="max-w-5xl mx-auto space-y-6">
+                <WhatsAppAuditChat
+                  userProfile={userProfile}
+                  teacherName={userProfile.name}
+                  schoolName={userProfile.schoolName || 'مدرسة الدقم للتعليم الأساسي'}
+                  subjectName={userProfile.subject || 'العلوم العامة'}
+                  assessments={assessments.filter((item) => item.schoolId === userProfile.uid)}
+                  language={language}
+                  onStartAuditForm={(tName, schName, subjName, targetAss) => {
+                    handleStartAuditFormFromChat(tName, schName, subjName, targetAss);
+                  }}
+                  onUploadNewFile={async (payload) => {
+                    setActionLoading(true);
+                    try {
+                      const fullPayload = {
+                        ...payload,
+                        subject: userProfile.subject || payload.subject,
+                        schoolId: userProfile.uid,
+                        schoolName: userProfile.schoolName || userProfile.name,
+                        schoolEmail: userProfile.email,
+                        status: 'Pending' as AssessmentStatus
+                      };
+                      const newId = await uploadAssessment(fullPayload);
+                      if (newId) {
+                        handleSuccess(
+                          language === 'ar' 
+                            ? `تم رفع الملف "${payload.title}" وإضافته في المحادثة المباشرة بنجاح!` 
+                            : `File "${payload.title}" uploaded to chat successfully!`
+                        );
+                        await fetchAssessmentList();
+                      }
+                    } catch (err: any) {
+                      handleError(err.message || 'Error uploading file');
+                    } finally {
+                      setActionLoading(false);
+                    }
+                  }}
+                  actionLoading={actionLoading}
+                  onSuccess={handleSuccess}
+                  onError={handleError}
                 />
               </div>
             ) : userProfile.role === 'school' && userProfile.roleType === 'teacher' ? (
@@ -2772,7 +2919,7 @@ export default function App() {
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-7">
               
               {/* Left Column (Search list or Draft creator) */}
-              <div className="lg:col-span-5 space-y-4 sm:space-y-6">
+              <div className={`${(currentAssessment || selectedApprovedForm) ? "hidden" : "lg:col-span-5"} space-y-4 sm:space-y-6`}>
                 
                 {/* School Administrative / Principal Status Info Card (Principals Observe, Teachers Upload) */}
                 {userProfile.role === 'school' && userProfile.roleType === 'administrative' && (
@@ -3087,10 +3234,12 @@ export default function App() {
                   <div className="bg-white rounded-2xl border border-slate-200/90 p-4 sm:p-5 shadow-xs space-y-4">
                     <div className="space-y-1">
                       <h3 className="font-bold font-heading text-slate-900 text-sm sm:text-base">
-                        {userProfile.role === 'school' ? getTranslatedText('nationalCatalog', language) : getTranslatedText('moderationRegistry', language)}
+                        {userProfile.role === 'school' 
+                          ? getTranslatedText('nationalCatalog', language) 
+                          : (language === 'ar' ? '🏫 قوائم المدارس التي رفعت ملفاتها' : 'Schools Uploaded Files List')}
                       </h3>
                       <p className="text-xs text-slate-500 font-sans">
-                        {language === 'ar' ? 'البحث وتصفية أوراق الامتحانات والمخططات الفنية المعتمدة' : 'Search and filter moderated exams and blueprints'}
+                        {language === 'ar' ? 'اختر مدرسة للانتقال لمحادثات معلميها والاطلاع على استمارة التدقيق' : 'Select a school to view teacher chat conversations'}
                       </p>
                     </div>
 
@@ -3286,13 +3435,13 @@ export default function App() {
                           ) : !selectedModeratorTeacher ? (
                             // Level 2: Teachers List for Selected School
                             <div className="space-y-2">
-                              {Array.from(new Set(filteredAssessments.filter(a => a.schoolName === selectedModeratorSchool).map(a => a.teacherName || a.schoolEmail || 'معلم المادة').filter(Boolean))).length === 0 ? (
+                              {Array.from(new Set(filteredAssessments.filter(a => a.schoolName === selectedModeratorSchool).map(a => formatCleanTeacherName(a.teacherName, a.schoolEmail)).filter(Boolean))).length === 0 ? (
                                 <div className="text-center py-12 text-slate-400 font-bold text-xs">
                                   {language === 'ar' ? 'لا يوجد معلمون لديهم مرفوعات في هذه المدرسة.' : 'No teachers found for this school.'}
                                 </div>
                               ) : (
-                                Array.from(new Set(filteredAssessments.filter(a => a.schoolName === selectedModeratorSchool).map(a => a.teacherName || a.schoolEmail || 'معلم المادة').filter(Boolean))).map((teacherName, tIdx) => {
-                                  const teacherUploads = filteredAssessments.filter(a => a.schoolName === selectedModeratorSchool && (a.teacherName || a.schoolEmail || 'معلم المادة') === teacherName);
+                                Array.from(new Set(filteredAssessments.filter(a => a.schoolName === selectedModeratorSchool).map(a => formatCleanTeacherName(a.teacherName, a.schoolEmail)).filter(Boolean))).map((teacherName, tIdx) => {
+                                  const teacherUploads = filteredAssessments.filter(a => a.schoolName === selectedModeratorSchool && (formatCleanTeacherName(a.teacherName, a.schoolEmail) === teacherName || a.teacherName === teacherName || a.schoolEmail === teacherName));
                                   const firstItem = teacherUploads[0];
                                   return (
                                     <div
@@ -3322,8 +3471,26 @@ export default function App() {
                               )}
                             </div>
                           ) : (
-                            // Level 3: Teacher's Uploaded Files
+                            // Level 3: Teacher's Uploaded Files list on the left sidebar
                             <div className="space-y-2.5">
+                              <div className="p-3 bg-emerald-50 border border-emerald-200/80 rounded-2xl flex items-center justify-between shadow-2xs">
+                                <div className="flex items-center gap-2 truncate">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0"></span>
+                                  <span className="text-xs font-extrabold text-emerald-900 truncate">
+                                    {selectedModeratorTeacher}
+                                  </span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCurrentAssessment(null);
+                                  }}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-xl cursor-pointer shadow-2xs shrink-0"
+                                >
+                                  💬 {language === 'ar' ? 'عرض المحادثة' : 'View Chat'}
+                                </button>
+                              </div>
+
                               {filteredAssessments.filter(a => a.schoolName === selectedModeratorSchool && (a.teacherName || a.schoolEmail || 'معلم المادة') === selectedModeratorTeacher).length === 0 ? (
                                 <div className="text-center py-12 text-slate-400 font-bold text-xs">
                                   {language === 'ar' ? 'لا توجد ملفات مرفوعة لهذا المعلم.' : 'No uploads found for this teacher.'}
@@ -3453,7 +3620,7 @@ export default function App() {
               </div>
 
               {/* Right Column (Exams details and moderation actions sheet) */}
-              <div className="lg:col-span-7 space-y-4 sm:space-y-6">
+              <div className={`${(currentAssessment || selectedApprovedForm) ? "col-span-12 w-full" : "lg:col-span-7"} space-y-4 sm:space-y-6`}>
                 
                 {/* Selected Certified/Approved Form Display or Standard Logic */}
                 {selectedApprovedForm ? (
@@ -3757,9 +3924,17 @@ export default function App() {
                                 <tr className="bg-[#fcfbee] border-b-2 border-black text-[15px]">
                                   <th className="py-2 px-2 text-slate-905 border-l-2 border-black font-black text-right w-10">#</th>
                                   <th className="py-2 px-3 text-slate-905 border-l-2 border-black font-black text-right">{language === 'ar' ? 'اسم الطالب المستهدف بالفرز والتقصي' : 'Student Full Name'}</th>
-                                  <th className="py-2 px-3 text-slate-905 border-l-2 border-black font-black text-center w-28">{language === 'ar' ? 'الأداة الفنية' : 'Assessment Tool'}</th>
-                                  <th className="py-2 px-2 text-slate-905 border-l-2 border-black font-black text-center w-24">{language === 'ar' ? 'الدرجة' : 'Mark'}</th>
-                                  <th className="py-2 px-3 text-slate-905 font-black text-right border-l-2 border-black">{language === 'ar' ? 'ملاحظات وتوجيهات المقارنة والتحقق من الفحص الفني' : 'Findings'}</th>
+                                  <th className="py-2 px-3 text-slate-905 border-l-2 border-black font-black text-center w-36">{language === 'ar' ? 'الأداة الفنية المفحوصة' : 'Assessment Tool'}</th>
+                                  <th className="py-2 px-2 text-slate-905 border-l-2 border-black font-black text-center w-28">
+                                    {selectedApprovedForm.grade === 'Grade 12' 
+                                      ? (language === 'ar' ? 'الدرجة' : 'Mark') 
+                                      : (language === 'ar' ? 'الدرجة المرصودة' : 'Recorded Mark')}
+                                  </th>
+                                  <th className="py-2 px-3 text-slate-905 font-black text-right border-l-2 border-black">
+                                    {selectedApprovedForm.grade === 'Grade 12'
+                                      ? (language === 'ar' ? 'سبب التعديل / ملاحظات التحقق' : 'Modification Reason / Audit Findings')
+                                      : (language === 'ar' ? 'حالة فحص الأداة ومطابقتها للمواصفات' : 'Tool Verification & Compliance')}
+                                  </th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -3772,12 +3947,16 @@ export default function App() {
                                       <td className="py-2.5 px-2 text-slate-805 text-center font-mono border-l-2 border-black">{index + 1}</td>
                                       <td className="py-2.5 px-3 text-slate-700 font-normal text-right border-l-2 border-black whitespace-normal break-words">{st.name}</td>
                                       <td className="py-2.5 px-3 text-slate-700 text-center font-normal border-l-2 border-black whitespace-normal break-words">{st.level}</td>
-                                      <td className="py-2.5 px-2 text-slate-700 text-center font-mono font-normal border-l-2 border-black">{st.mark}</td>
+                                      <td className="py-2.5 px-2 text-slate-700 text-center font-mono font-black border-l-2 border-black">{st.mark}</td>
                                       <td className="py-2.5 px-3 text-center text-slate-800 font-bold whitespace-normal break-words border-l-2 border-black">
-                                        {['1', '2', '3', '4', '5', '6'].includes((st.notes || '').trim()) ? (
+                                        {selectedApprovedForm.grade === 'Grade 12' && ['1', '2', '3', '4', '5', '6'].includes((st.notes || '').trim()) ? (
                                           <span className="font-mono text-[#821315] font-black text-sm bg-red-50/50 px-2 py-0.5 rounded">{st.notes}</span>
                                         ) : (
-                                          <span className="text-slate-500 font-medium">{st.notes === 'لا يوجد' || !st.notes ? (language === 'ar' ? 'لا يوجد' : 'None') : st.notes}</span>
+                                          <span className="text-slate-700 font-medium">
+                                            {st.notes === 'لا يوجد' || !st.notes 
+                                              ? (selectedApprovedForm.grade === 'Grade 12' ? (language === 'ar' ? 'لا يوجد' : 'None') : (language === 'ar' ? 'مستوفٍ ومطابق للمواصفات' : 'Compliant')) 
+                                              : st.notes}
+                                          </span>
                                         )}
                                       </td>
                                     </tr>
@@ -3791,50 +3970,92 @@ export default function App() {
                             </table>
                           </div>
 
-                          {/* Row 3: Classroom Observation and Structural Criteria Match logs */}
+                          {/* Row 3: Classroom Observation & Technical Observations */}
                           <div className="grid grid-cols-12 gap-3 mt-4">
                             <div className="col-span-8 border-2 border-black rounded overflow-hidden bg-white text-right font-sans" dir="rtl" style={{ contentVisibility: 'auto' }}>
                               <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
-                                {language === 'ar' ? 'بنود المطابقة التفصيلية وجودة محاذاة الأسئلة مع مناهج وزارة التعليم لسلطنة عمان' : 'Syllabus Benchmarks'}
+                                {selectedApprovedForm.grade !== 'Grade 12'
+                                  ? (language === 'ar' ? 'الملاحظات الفنية لأدوات التقويم المستمر (تُكتب بخط يد الفاحص)' : 'Technical Observations (Handwritten by Auditor)')
+                                  : (language === 'ar' ? 'بنود المطابقة التفصيلية وجودة محاذاة الأسئلة مع مناهج وزارة التعليم لسلطنة عمان' : 'Syllabus Benchmarks')}
                               </div>
-                              <table className="w-full text-[16px] border-collapse text-right leading-normal font-sans" dir="rtl">
-                                <thead>
-                                  <tr className="bg-slate-50 border-b-2 border-black text-[15px]">
-                                    <th className="py-2 px-3 text-slate-705 font-extrabold text-right border-l-2 border-black">{language === 'ar' ? 'الصف' : 'Class'}</th>
-                                    <th className="py-2 px-3 text-slate-705 font-extrabold text-center border-l-2 border-black">{language === 'ar' ? 'الأداة' : 'Tool'}</th>
-                                    <th className="py-2 px-3 text-slate-705 font-extrabold text-center border-l-2 border-black">{language === 'ar' ? 'الحالة الفنية' : 'Verification Status'}</th>
-                                    <th className="py-2 px-3 text-slate-705 font-extrabold text-right">{language === 'ar' ? 'ملاحظات التدقيق والمطابقة' : 'Detailed Findings'}</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {selectedApprovedForm.observations && selectedApprovedForm.observations.length > 0 ? (
-                                    selectedApprovedForm.observations.map((obs, idx) => (
-                                      <tr key={`approved-view-obs-${obs.tool || 'obs'}-${idx}`} className="border-b-2 border-black last:border-0 hover:bg-slate-50/50">
-                                        <td className="py-2.5 px-3 text-slate-700 text-right font-normal border-l-2 border-black">{translateGrade(obs.gradeClass, language)}</td>
-                                        <td className="py-2.5 px-3 text-slate-705 text-center font-normal border-l-2 border-black whitespace-normal break-words">{obs.tool}</td>
-                                        <td className="py-2.5 px-3 text-center border-l-2 border-black">
-                                          
-                                          <span className={`px-2.5 py-1 text-[13px] font-black rounded uppercase leading-none ${
-                                            obs.status === 'غير مطابق' || obs.status === 'Non-conforming' 
-                                              ? 'bg-rose-50 text-rose-800'
-                                              : 'bg-emerald-50 text-emerald-800'
-                                          }`}>
-                                            {obs.status || (language === 'ar' ? 'مستوفٍ ومطابق' : 'Approved')}
-                                          </span>
 
-                                        </td>
-                                        <td className="py-2.5 px-3 text-slate-600 font-normal text-right whitespace-normal break-words leading-relaxed">{obs.notes || (language === 'ar' ? 'الأسئلة والمسافات مطابقة تماماً للمواصفة المعتمدة.' : 'Optimal assessment design.')}</td>
-                                      </tr>
-                                    ))
-                                  ) : (
-                                    <tr key="approved-obs-empty">
-                                      <td colSpan={4} className="py-2 text-center text-slate-400">{language === 'ar' ? 'لا توجد ملاحظات تدقيق.' : 'No findings.'}</td>
+                              {selectedApprovedForm.grade !== 'Grade 12' ? (
+                                /* Ruled Handwritten Observations View for Approved Continuous Audit */
+                                <div className="p-3 bg-[#faf9f5]/60 flex flex-col justify-between min-h-[220px]">
+                                  <div className="space-y-0 w-full font-sans">
+                                    {(() => {
+                                      const notesText = selectedApprovedForm.observations && selectedApprovedForm.observations.length > 0
+                                        ? selectedApprovedForm.observations.map(o => o.notes).filter(Boolean).join('\n')
+                                        : '• كراسات الطلاب وأعمالهم مصححة بانتظام وتتضمن تغذية راجعة هادفة.\n• الأسئلة صيغت بوضوح وتراعي المستويات المعرفية الثلاثية وجداول المواصفات.\n• رصد درجات أدوات التقويم المستمر متسق ومطابق للسجلات والبوابة التعليمية.';
+                                      const rawLines = notesText.split('\n').filter(l => l.trim().length > 0);
+                        const totalLines = Math.max(6, rawLines.length + 2);
+                                      const linesArray = Array.from({ length: totalLines }, (_, i) => rawLines[i] || '');
+
+                                      return linesArray.map((lineText, lineIdx) => (
+                                        <div 
+                                          key={`approved-ruled-line-${lineIdx}`}
+                                          className="flex items-center min-h-[34px] border-b border-dashed border-[#821315]/35 px-2 text-[14px] leading-relaxed"
+                                          style={{ minHeight: '34px' }}
+                                        >
+                                          {lineText ? (
+                                            <span className="font-bold text-slate-850 tracking-wide font-sans">{lineText}</span>
+                                          ) : (
+                                            <span className="text-slate-300 text-xs italic select-none">........................................................................................................................................................................................................................</span>
+                                          )}
+                                        </div>
+                                      ));
+                                    })()}
+                                  </div>
+
+                                  <div className="mt-3 pt-2 border-t border-[#821315]/30 flex items-center justify-between text-[13px] font-bold text-[#821315]">
+                                    <div>
+                                      <span>اسم وتوقيع الفاحص بخط اليد: </span>
+                                      <span className="font-mono text-slate-800 font-bold">{selectedApprovedForm.examinerSignedName || selectedApprovedForm.examinerName || '...........................................'}</span>
+                                    </div>
+                                    <div>
+                                      <span>التاريخ: </span>
+                                      <span className="font-mono text-slate-800 font-bold">{selectedApprovedForm.visitDate || '.... / .... / 2026م'}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* Grade 12 Benchmarks Table */
+                                <table className="w-full text-[16px] border-collapse text-right leading-normal font-sans" dir="rtl">
+                                  <thead>
+                                    <tr className="bg-slate-50 border-b-2 border-black text-[15px]">
+                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-right border-l-2 border-black">{language === 'ar' ? 'الصف' : 'Class'}</th>
+                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-center border-l-2 border-black">{language === 'ar' ? 'الأداة' : 'Tool'}</th>
+                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-center border-l-2 border-black">{language === 'ar' ? 'الحالة الفنية' : 'Verification Status'}</th>
+                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-right">{language === 'ar' ? 'ملاحظات التدقيق والمطابقة' : 'Detailed Findings'}</th>
                                     </tr>
-                                  )}
-                                </tbody>
-                              </table>
+                                  </thead>
+                                  <tbody>
+                                    {selectedApprovedForm.observations && selectedApprovedForm.observations.length > 0 ? (
+                                      selectedApprovedForm.observations.map((obs, idx) => (
+                                        <tr key={`approved-view-obs-${obs.tool || 'obs'}-${idx}`} className="border-b-2 border-black last:border-0 hover:bg-slate-50/50">
+                                          <td className="py-2.5 px-3 text-slate-700 text-right font-normal border-l-2 border-black">{translateGrade(obs.gradeClass, language)}</td>
+                                          <td className="py-2.5 px-3 text-slate-705 text-center font-normal border-l-2 border-black whitespace-normal break-words">{obs.tool}</td>
+                                          <td className="py-2.5 px-3 text-center border-l-2 border-black">
+                                            <span className={`px-2.5 py-1 text-[13px] font-black rounded uppercase leading-none ${
+                                              obs.status === 'غير مطابق' || obs.status === 'Non-conforming' 
+                                                ? 'bg-rose-50 text-rose-800'
+                                                : 'bg-emerald-50 text-emerald-800'
+                                            }`}>
+                                              {obs.status || (language === 'ar' ? 'مستوفٍ ومطابق' : 'Approved')}
+                                            </span>
+                                          </td>
+                                          <td className="py-2.5 px-3 text-slate-600 font-normal text-right whitespace-normal break-words leading-relaxed">{obs.notes || (language === 'ar' ? 'الأسئلة والمسافات مطابقة تماماً للمواصفة المعتمدة.' : 'Optimal assessment design.')}</td>
+                                        </tr>
+                                      ))
+                                    ) : (
+                                      <tr key="approved-obs-empty">
+                                        <td colSpan={4} className="py-2 text-center text-slate-400">{language === 'ar' ? 'لا توجد ملاحظات تدقيق.' : 'No findings.'}</td>
+                                      </tr>
+                                    )}
+                                  </tbody>
+                                </table>
+                              )}
                             </div>
-
                             {/* Digital Signatures area with stamped principal details */}
                             <div className="col-span-4 border-2 border-black rounded overflow-hidden bg-[#faf9f5] flex flex-col justify-between p-3.5 text-right font-sans relative" dir="rtl">
                                {selectedApprovedForm.isSigned && selectedApprovedForm.signatureStampUrl !== 'no_stamp' && (
@@ -3888,24 +4109,67 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                ) : !currentAssessment ? (
-                  <div className="bg-white rounded-3xl p-12 border border-slate-200/50 text-center text-slate-400 shadow-sm space-y-4 py-28 animate-in fade-in duration-200">
-                    <div className="w-20 h-20 bg-slate-50 rounded-2xl flex items-center justify-center mx-auto text-slate-300 shadow-inner">
-                      <ClipboardList className="w-9 h-9 stroke-[1.2]" />
-                    </div>
-                    <div className="space-y-1">
-                      <h4 className="font-bold font-heading text-indigo-650 text-base">{language === 'ar' ? 'لم يتم تحديد أي مادة دراسية' : 'No Portal Material Selected'}</h4>
-                      <p className="text-xs text-slate-400 leading-relaxed max-w-sm mx-auto font-sans">
-                        {language === 'ar' ? 'يرجى تصفح قائمة التقييمات والضغط على أي ملف لعرض الأسئلة المقترحة، ونماذج توزيع الدرجات، وسجلات التدقيق والمراجعة الوزارية.' : 'Please scroll the national moderation queue and click on any test blueprint to view student questions, answer schemes, verification timelines, and subject review decisions.'}
-                      </p>
-                    </div>
-                  </div>
-                ) : (
-                  // Document Evaluation Screen (Watermarked pedagogical viewport)
+                ) : selectedModeratorTeacher ? (
+                  // 💬 FIXED PERSISTENT WHATSAPP AUDIT CHAT STREAM FOR AUDITOR
                   <div className="space-y-6 animate-in fade-in duration-200">
-                    
-                    {/* Viewport Header */}
-                    <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/50 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <WhatsAppAuditChat
+                      userProfile={userProfile}
+                      teacherName={selectedModeratorTeacher}
+                      schoolName={selectedModeratorSchool || ''}
+                      subjectName={
+                        (filteredAssessments.find(a => 
+                          a.schoolName === selectedModeratorSchool && 
+                          (formatCleanTeacherName(a.teacherName, a.schoolEmail) === selectedModeratorTeacher || a.teacherName === selectedModeratorTeacher || a.schoolEmail === selectedModeratorTeacher)
+                        )?.subject) || (assessments.find(a => 
+                          (formatCleanTeacherName(a.teacherName, a.schoolEmail) === selectedModeratorTeacher || a.teacherName === selectedModeratorTeacher || a.schoolEmail === selectedModeratorTeacher)
+                        )?.subject) || 'الرياضيات'
+                      }
+                      assessments={filteredAssessments.filter(a => 
+                        a.schoolName === selectedModeratorSchool && 
+                        (formatCleanTeacherName(a.teacherName, a.schoolEmail) === selectedModeratorTeacher || a.teacherName === selectedModeratorTeacher || a.schoolEmail === selectedModeratorTeacher)
+                      )}
+                      language={language}
+                      onBack={() => {
+                        setSelectedModeratorTeacher(null);
+                        setCurrentAssessment(null);
+                      }}
+                      onStartAuditForm={(tName, schName, subjName, targetAss) => {
+                        handleStartAuditFormFromChat(tName, schName, subjName, targetAss);
+                      }}
+                      onUploadNewFile={async (payload) => {
+                        setActionLoading(true);
+                        try {
+                          const fullPayload = {
+                            ...payload,
+                            teacherName: selectedModeratorTeacher,
+                            schoolId: userProfile.uid,
+                            schoolName: selectedModeratorSchool || userProfile.schoolName || userProfile.name,
+                            schoolEmail: userProfile.email,
+                            status: 'Pending' as AssessmentStatus
+                          };
+                          await uploadAssessment(fullPayload);
+                          handleSuccess(
+                            language === 'ar' 
+                              ? `تم إضافة الملف "${payload.title}" في محادثة المعلم بنجاح!` 
+                              : `File "${payload.title}" added to teacher chat!`
+                          );
+                          await fetchAssessmentList();
+                        } catch (err: any) {
+                          handleError(err.message || 'Error uploading file');
+                        } finally {
+                          setActionLoading(false);
+                        }
+                      }}
+                      actionLoading={actionLoading}
+                      onSuccess={handleSuccess}
+                      onError={handleError}
+                    />
+
+                    {/* Inspection panel & Ministry Audit Form rendered under the fixed chat when a file is inspected */}
+                    {currentAssessment && (
+                      <div className="space-y-6 pt-6 border-t-2 border-indigo-200/80" id="auditor-inspection-panel">
+                        {/* Viewport Header */}
+                        <div className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200/50 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                       <div className="space-y-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[9.5px] font-bold text-slate-400 uppercase tracking-widest bg-slate-50 px-2 py-0.5 rounded leading-none border border-slate-100">
@@ -3932,6 +4196,17 @@ export default function App() {
 
                       {/* Action buttons (Claim, Edit state depends on roles) */}
                       <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCurrentAssessment(null);
+                            setSelectedApprovedForm(null);
+                          }}
+                          className="px-3 sm:px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-200"
+                          title={language === "ar" ? "العودة إلى القائمة الرئيسية" : "Return to Queue"}
+                        >
+                          <span>{language === "ar" ? "← العودة للقائمة" : "← Back to Queue"}</span>
+                        </button>
                         {/* School Representative: Trigger revision edit */}
                         {userProfile.role === 'school' && currentAssessment.status === 'Revision Request' && (
                           <button
@@ -4155,7 +4430,7 @@ export default function App() {
                     </div>
 
                     {/* --- OFFICIAL OMAN MOE CONTINUOUS MODERATION FORM GENERATOR & BLUEPRINT --- */}
-                    <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 p-4 sm:p-8 shadow-md space-y-4 sm:space-y-6 animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl sm:rounded-3xl border border-slate-200 p-4 sm:p-8 shadow-md space-y-4 sm:space-y-6 animate-in fade-in duration-200 w-full" dir="rtl">
                       
                       {/* Form Header */}
                       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-4 sm:pb-5">
@@ -4257,360 +4532,590 @@ export default function App() {
                       </div>
 
                       {/* Interactive Edit Form Panels (Visible to claims moderators and admins only, view allowed to schools as well) */}
-                      <div className="space-y-5 bg-slate-50/50 p-5 rounded-2xl border border-slate-200/60 no-print text-right">
+                      <div className="space-y-6 bg-slate-50/60 p-6 sm:p-8 rounded-3xl border border-slate-200/80 no-print text-right w-full max-w-none shadow-sm" dir="rtl">
                         
-                        <div className="border-b border-slate-100 pb-2">
-                          <h4 className="text-[11px] font-black text-[#821315] uppercase tracking-wide">
-                            {language === 'ar' ? '🛠️ لوحة تحرير وتعبئة بيانات الاستمارة الوزارية' : '🛠️ Ministry Auditing Form Editor'}
-                          </h4>
+                        <div className="border-b border-slate-200 pb-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div className="space-y-0.5">
+                            <h4 className="text-xs sm:text-sm font-black text-[#821315] uppercase tracking-wider flex items-center gap-2">
+                              <span>🛠️ {language === 'ar' ? 'لوحة تحرير وتعبئة بيانات الاستمارة الوزارية' : 'Ministry Auditing Form Editor'}</span>
+                              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                                isGrade12 ? 'bg-indigo-100 text-indigo-900 border border-indigo-200' : 'bg-teal-100 text-teal-900 border border-teal-200'
+                              }`}>
+                                {isGrade12 ? (language === 'ar' ? 'دبلوم التعليم العام (الصف 12)' : 'Grade 12 Diploma') : (language === 'ar' ? 'فحص مستمر (الصفوف 1 - 11)' : 'Continuous (Grades 1-11)')}
+                              </span>
+                            </h4>
+                            <p className="text-[11px] text-slate-500 font-medium">
+                              {isGrade12 
+                                ? (language === 'ar' ? 'نموذج دبلوم التعليم العام (الصف 12): يتضمن رصد الدرجات قبل وبعد مع تحديد رموز التعديل 1 إلى 6.' : 'Diploma format (Grade 12): Includes before/after score tracking & reason codes 1-6.')
+                                : (language === 'ar' ? 'نموذج الفحص والتدقيق المستمر (الصفوف 1 - 11): تم إلغاء خانات تعديل الدرجات قبل/بعد، والملاحظات الفنية يكتبها الفاحص بخط يده.' : 'Continuous format (Grades 1-11): Grade alteration removed; technical remarks are handwritten by the examiner.')}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => setAuditGradeMode('continuous')}
+                              className={`px-3 py-1.5 text-xs font-black rounded-lg transition-all cursor-pointer ${
+                                !isGrade12 
+                                  ? 'bg-[#0d9488] text-white shadow-xs' 
+                                  : 'text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              🔄 {language === 'ar' ? 'صفوف النقل (1 - 11)' : 'Grades 1-11'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAuditGradeMode('grade12')}
+                              className={`px-3 py-1.5 text-xs font-black rounded-lg transition-all cursor-pointer ${
+                                isGrade12 
+                                  ? 'bg-[#4338ca] text-white shadow-xs' 
+                                  : 'text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              🛡️ {language === 'ar' ? 'الصف 12 (دبلوم)' : 'Grade 12 (Diploma)'}
+                            </button>
+                          </div>
                         </div>
 
                         {/* Grid 1: Teacher metadata */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'اسم المعلم المسؤول' : 'Teacher Name'}</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'اسم المعلم المسؤول' : 'Teacher Name'}</label>
                             <input
                               type="text"
                               value={auditTeacherName}
                               onChange={(e) => setAuditTeacherName(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
                             />
                           </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'رقم الملف المالي/الوظيفي' : 'File Number'}</label>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'رقم الملف المالي/الوظيفي' : 'File Number'}</label>
                             <input
                               type="text"
                               value={auditTeacherFileNo}
                               onChange={(e) => setAuditTeacherFileNo(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
                             />
                           </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'سنة التعيين' : 'Appointment Year'}</label>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'سنة التعيين' : 'Appointment Year'}</label>
                             <input
                               type="text"
                               value={auditAppointmentYear}
                               onChange={(e) => setAuditAppointmentYear(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
                             />
                           </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-1">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'المديرية العامة بمحافظة' : 'General Directorate'}</label>
-                            <input
-                              type="text"
-                              value={auditDirectorate}
-                              onChange={(e) => setAuditDirectorate(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'المدرسة' : 'School'}</label>
-                            <input
-                              type="text"
-                              value={auditSchool}
-                              onChange={(e) => setAuditSchool(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'التخصص الدراسي' : 'Specialization'}</label>
-                            <input
-                              type="text"
-                              value={auditSpecialization}
-                              onChange={(e) => setAuditSpecialization(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'تاريخ الزيارة' : 'Visit Date'}</label>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'تاريخ الزيارة' : 'Visit Date'}</label>
                             <input
                               type="date"
                               value={auditVisitDate}
                               onChange={(e) => setAuditVisitDate(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold cursor-pointer"
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs cursor-pointer"
                             />
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'المادة الدراسية بالاستمارة' : 'Form Subject'}</label>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 pt-1">
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'المديرية العامة بمحافظة' : 'General Directorate'}</label>
+                            <input
+                              type="text"
+                              value={auditDirectorate}
+                              onChange={(e) => setAuditDirectorate(e.target.value)}
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'المدرسة' : 'School'}</label>
+                            <input
+                              type="text"
+                              value={auditSchool}
+                              onChange={(e) => setAuditSchool(e.target.value)}
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'التخصص الدراسي' : 'Specialization'}</label>
+                            <input
+                              type="text"
+                              value={auditSpecialization}
+                              onChange={(e) => setAuditSpecialization(e.target.value)}
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'المادة الدراسية بالاستمارة' : 'Form Subject'}</label>
                             <input
                               type="text"
                               value={auditSubjectName}
                               onChange={(e) => setAuditSubjectName(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
                             />
                           </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'العام الدراسي' : 'Academic Year'}</label>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 pt-1">
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'العام الدراسي' : 'Academic Year'}</label>
                             <input
                               type="text"
                               value={auditAcademicYear}
                               onChange={(e) => setAuditAcademicYear(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
                             />
                           </div>
-                          <div className="space-y-1">
-                            <label className="text-[10px] font-bold text-slate-450 mr-1 block">{language === 'ar' ? 'الفصل الدراسي' : 'Semester'}</label>
+                          <div className="space-y-1.5">
+                            <label className="text-[11px] font-extrabold text-slate-700 block">{language === 'ar' ? 'الفصل الدراسي' : 'Semester'}</label>
                             <input
                               type="text"
                               value={auditSemester}
                               onChange={(e) => setAuditSemester(e.target.value)}
-                              className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-semibold"
+                              className="w-full px-4 py-2.5 border border-slate-300 rounded-xl text-xs bg-white text-slate-900 font-bold shadow-2xs"
                             />
                           </div>
                         </div>
 
-                        {/* Table 1: Student Samples editing (Rows 1 to 6) */}
-                        <div className="space-y-2 pt-3">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-sans">
-                            {language === 'ar' ? '1. جدول عينة درجات ومطابقة الطلاب الستة - 2 ممتاز، 2 متوسط، 2 متدني' : '1. Six-Student Sample Allocation Table'}
-                          </label>
-                          <div className="overflow-x-auto rounded-xl border-2 border-black bg-white shadow-xs">
-                            <table className="w-full text-right text-xs border-collapse">
-                              <thead className="bg-slate-50 text-slate-600 font-black border-b-2 border-black">
-                                <tr>
-                                  <th className="py-2.5 px-3 text-center border-l-2 border-black w-12 mr-0">م</th>
-                                  <th className="py-2.5 px-3 border-l-2 border-black">{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
-                                  <th className="py-2.5 px-3 border-l-2 border-black w-16 text-center">{language === 'ar' ? 'الصف' : 'Class'}</th>
-                                  <th className="py-2.5 px-3 border-l-2 border-black w-32">{language === 'ar' ? 'أداة التقييم' : 'Assessment Tool'}</th>
-                                  <th className="py-1 px-1 border-l-2 border-black w-28 text-center bg-slate-100/70" colSpan={2}>
-                                    <div className="flex items-center justify-center w-full font-black text-[13px] text-slate-800 py-0.5">{language === 'ar' ? 'الدرجة' : 'Grade'}</div>
-                                    <div className="grid grid-cols-2 text-[11px] border-t border-black/40 pt-0.5 font-black divide-x divide-x-reverse divide-black/40 bg-white/70">
-                                      <span className="text-slate-900 px-1 font-black">{language === 'ar' ? 'قبل' : 'Before'}</span>
-                                      <span className="text-slate-900 px-1 font-black">{language === 'ar' ? 'بعد' : 'After'}</span>
-                                    </div>
-                                  </th>
-                                  <th className="py-2.5 px-3 text-center font-black">{language === 'ar' ? 'سبب التعديل' : 'Modification Reason'}</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y-2 divide-black">
-                                {auditStudents.map((stud, idx) => (
-                                  <tr key={`audit-edit-student-${stud.id || idx}-${idx}`} className="hover:bg-slate-50/50 border-b-2 border-black last:border-0">
-                                    <td className="py-2 px-3 text-center font-bold border-l-2 border-black">{stud.id}</td>
-                                    <td className="py-1 px-2 border-l-2 border-black">
-                                      <input
-                                        type="text"
-                                        value={stud.name}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          copy[idx].name = e.target.value;
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2 border-l-2 border-black text-center">
-                                      <input
-                                        type="text"
-                                        value={stud.gradeClass}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          copy[idx].gradeClass = e.target.value;
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-1 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2 border-l-2 border-black">
-                                      <input
-                                        type="text"
-                                        value={stud.tool}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          copy[idx].tool = e.target.value;
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2 border-l-2 border-black text-center">
-                                      <input
-                                        type="text"
-                                        value={stud.scoreBefore}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          const nextVal = e.target.value;
-                                          copy[idx].scoreBefore = nextVal;
-                                          if (nextVal.trim() === copy[idx].scoreAfter.trim()) {
-                                            copy[idx].reason = 'لا يوجد';
-                                          } else {
-                                            if (copy[idx].reason === 'لا يوجد' || !['1', '2', '3', '4', '5', '6'].includes(copy[idx].reason)) {
-                                              copy[idx].reason = '1';
-                                            }
-                                          }
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-1 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-semibold text-slate-700"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2 border-l-2 border-black text-center">
-                                      <input
-                                        type="text"
-                                        value={stud.scoreAfter}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          const nextVal = e.target.value;
-                                          copy[idx].scoreAfter = nextVal;
-                                          if (copy[idx].scoreBefore.trim() === nextVal.trim()) {
-                                            copy[idx].reason = 'لا يوجد';
-                                          } else {
-                                            if (copy[idx].reason === 'لا يوجد' || !['1', '2', '3', '4', '5', '6'].includes(copy[idx].reason)) {
-                                              copy[idx].reason = '1';
-                                            }
-                                          }
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-1 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-semibold text-[#821315]"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2 border-l-2 border-black text-center">
-                                      <input
-                                        type="text"
-                                        value={stud.tool}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          copy[idx].tool = e.target.value;
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2 border-l-2 border-black text-center">
-                                      <input
-                                        type="text"
-                                        value={stud.scoreBefore}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          const nextVal = e.target.value;
-                                          copy[idx].scoreBefore = nextVal;
-                                          if (nextVal.trim() === copy[idx].scoreAfter.trim()) {
-                                            copy[idx].reason = 'لا يوجد';
-                                          } else {
-                                            if (copy[idx].reason === 'لا يوجد' || !['1', '2', '3', '4', '5', '6'].includes(copy[idx].reason)) {
-                                              copy[idx].reason = '1';
-                                            }
-                                          }
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-1 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-semibold text-slate-700"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2 border-l-2 border-black text-center">
-                                      <input
-                                        type="text"
-                                        value={stud.scoreAfter}
-                                        onChange={(e) => {
-                                          const copy = [...auditStudents];
-                                          const nextVal = e.target.value;
-                                          copy[idx].scoreAfter = nextVal;
-                                          if (copy[idx].scoreBefore.trim() === nextVal.trim()) {
-                                            copy[idx].reason = 'لا يوجد';
-                                          } else {
-                                            if (copy[idx].reason === 'لا يوجد' || !['1', '2', '3', '4', '5', '6'].includes(copy[idx].reason)) {
-                                              copy[idx].reason = '1';
-                                            }
-                                          }
-                                          setAuditStudents(copy);
-                                        }}
-                                        className="w-full px-1 py-1 text-center text-[13px] border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-bold text-[#821315]"
-                                      />
-                                    </td>
-                                    <td className="py-1 px-2">
-                                      {stud.scoreBefore.trim() === stud.scoreAfter.trim() ? (
-                                        <div className="w-full px-2 py-1 text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded font-medium text-center font-sans">
-                                          {language === 'ar' ? 'لا يوجد تعديل (لا يوجد)' : 'No modification'}
-                                        </div>
-                                      ) : (
-                                        <select
-                                          value={['1', '2', '3', '4', '5', '6'].includes(stud.reason) ? stud.reason : '1'}
-                                          onChange={(e) => {
-                                            const copy = [...auditStudents];
-                                            copy[idx].reason = e.target.value;
-                                            setAuditStudents(copy);
-                                          }}
-                                          className="w-full px-2 py-1 text-xs border border-slate-200 focus:border-red-600 rounded bg-white text-slate-800 cursor-pointer font-sans font-medium"
-                                          style={{ direction: 'rtl' }}
-                                        >
-                                          <option value="1">1 - {language === 'ar' ? 'وجود خطأ في نقل درجة الطالب من أداة التقويم إلى سجل درجات المعلم' : '1 - Transfer error'}</option>
-                                          <option value="2">2 - {language === 'ar' ? 'وجود خطأ في رصد الدرجة في البوابة التعليمية' : '2 - Entry in portal error'}</option>
-                                          <option value="3">3 - {language === 'ar' ? 'وجود خطأ في التصحيح التقديري' : '3 - Underestimation error'}</option>
-                                          <option value="4">4 - {language === 'ar' ? 'وجود خطأ في جمع الدرجات سواءً كانت لأداة التقويم أو سجل درجات المعلم' : '4 - Row calculations/sum error'}</option>
-                                          <option value="5">5 - {language === 'ar' ? 'وجود خطأ في جبر درجة المجموع' : '5 - Rounding adjustment error'}</option>
-                                          <option value="6">6 - {language === 'ar' ? 'عدم توفر الدليل على أعمال الطلبة' : '6 - Absence of student work evidence'}</option>
-                                        </select>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
+                        {/* Assessment Sample & Observations Editing */}
+                        {!isGrade12 ? (
+                          /* Continuous Assessment (Grades 1-11): Exact layout matching reference image */
+                          <div className="space-y-4 pt-3">
+                            {/* Direction Banner */}
+                            <div className="p-3.5 bg-teal-50/80 border border-teal-200 rounded-xl text-xs text-teal-950 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                              <div className="flex items-start gap-2.5">
+                                <span className="text-xl shrink-0">📋</span>
+                                <div>
+                                  <h5 className="font-black text-teal-950 text-xs">
+                                    {language === 'ar' ? 'نموذج الفحص والتدقيق المستمر (الصفوف 1 - 11):' : 'Continuous Assessment Form (Grades 1-11):'}
+                                  </h5>
+                                  <p className="text-[11px] text-teal-900 leading-relaxed mt-0.5">
+                                    {language === 'ar' 
+                                      ? 'تم إلغاء خانات تعديل الدرجات قبل/بعد وفق اللائحة الوزارية. تشتمل الاستمارة على جدولين متجاورين: عينة أسماء الطلاب (يمين)، وأدوات التقويم المستمر مع خانات الملاحظات الفنية وجوانب التطوير (يسار) التي يكتبها الفاحص بخط اليد أو يطبعها جاهزة.'
+                                      : 'Grade modification columns removed. The audit comprises two side-by-side tables: Student sample names (right) and Continuous assessment tools with Technical notes & development remarks (left).'}
+                                  </p>
+                                </div>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAuditObservations([
+                                      { id: 1, gradeClass: 'الصف العاشر', tool: 'اختبار قصير 1', notes: 'الأسئلة مصاغة بدقة وتراعي المستويات المعرفية الثلاثية وجداول المواصفات، مع تصحيح دوري وتغذية راجعة هادفة للطلبة.' },
+                                      { id: 2, gradeClass: 'الصف العاشر', tool: 'عرض شفوي', notes: 'الأعمال والأنشطة مكتملة وموثقة بكشوف رصد ملحقة ومطابقة للأدلة والمعايير المعتمدة من الوزارة.' },
+                                      { id: 3, gradeClass: 'الصف العاشر', tool: 'سؤال قصير', notes: 'أسئلة قصيرة هادفة ومصححة أولاً بأول مع وجود نوعية توجيهات هادفة وداعمة للمستوى المعرفي.' },
+                                      { id: 4, gradeClass: 'الصف العاشر', tool: 'واجب منزلي', notes: 'كراسات الطلاب منتظمة ورصد الدرجات متسق ومطابق للسجلات والبوابة التعليمية دون وجود أية فروقات.' },
+                                    ]);
+                                  }}
+                                  className="text-[11px] font-black text-teal-900 hover:text-teal-950 bg-teal-100 hover:bg-teal-200 px-3 py-1.5 rounded-lg border border-teal-300 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                                >
+                                  🎯 {language === 'ar' ? 'أدوات الأستاذ: اختبار قصير 1 • عرض شفوي • سؤال قصير • واجب منزلي' : 'Standard Tools: Quiz 1, Oral, Question, HW'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAuditObservations([
+                                      { id: 1, gradeClass: 'الصف العاشر', tool: 'الاختبارات القصيرة', notes: 'الأسئلة مصاغة بدقة وتراعي المستويات المعرفية الثلاثية وجداول المواصفات، مع تصحيح دوري وتغذية راجعة هادفة للطلبة.' },
+                                      { id: 2, gradeClass: 'الصف العاشر', tool: 'الأنشطة العملية / المشاريع', notes: 'الأعمال والأنشطة مكتملة وموثقة بكشوف رصد ملحقة ومطابقة للأدلة والمعايير المعتمدة من الوزارة.' },
+                                      { id: 3, gradeClass: 'الصف العاشر', tool: 'الواجبات والمهام التعليمية', notes: 'كراسات الطلاب منتظمة والواجبات مصححة أولاً بأول مع وجود نوعية توجيهات هادفة وداعمة للمستوى المعرفي.' },
+                                      { id: 4, gradeClass: 'الصف العاشر', tool: 'الملاحظة الصفية ودفتر الطالب', notes: 'رصد درجات أدوات التقويم المستمر متسق ومطابق للسجلات والبوابة التعليمية دون وجود أية فروقات.' },
+                                    ]);
+                                  }}
+                                  className="text-[11px] font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-300 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                                >
+                                  📚 {language === 'ar' ? 'أدوات اللائحة العامة' : 'General Tools'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAuditObservations(prev => prev.map(o => ({ ...o, notes: '' })));
+                                  }}
+                                  className="text-[11px] font-bold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg border border-rose-200 transition-colors cursor-pointer flex items-center gap-1 shadow-2xs"
+                                >
+                                  🗑️ {language === 'ar' ? 'تفريغ الملاحظات للكتابة باليد' : 'Clear Notes'}
+                                </button>
+                              </div>
+                            </div>
 
-                        {/* Table 2: Technical Observations list (Rows 1 to 4) */}
-                        <div className="space-y-2 pt-3">
-                          <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-sans">
-                            {language === 'ar' ? '2. الملاحظات الفنية الأساسية على كراسات وأدوات الفحص والتقويم المستمر' : '2. Technical Remarks on Continuous Assessment Instruments'}
-                          </label>
-                          <div className="overflow-x-auto rounded-xl border-2 border-black bg-white shadow-xs">
-                            <table className="w-full text-right text-xs">
-                              <thead className="bg-slate-50 text-slate-800 font-bold border-b-2 border-black">
-                                <tr>
-                                  <th className="py-2.5 px-3 border-l-2 border-black w-24 text-center">{language === 'ar' ? 'الصف' : 'Class'}</th>
-                                  <th className="py-2.5 px-3 border-l-2 border-black w-36">{language === 'ar' ? 'أداة التقويم المعنية' : 'Assessment Tool'}</th>
-                                  <th className="py-2.5 px-4">{language === 'ar' ? 'الملاحظات الفنية التفصيلية' : 'Technical Observations / Detailed Remarks'}</th>
-                                </tr>
-                              </thead>
-                              <tbody className="divide-y-2 divide-black">
-                                {auditObservations.map((obs, idx) => (
-                                  <tr key={`audit-edit-obs-${obs.id || idx}-${idx}`} className="hover:bg-slate-50/50 border-b-2 border-black last:border-0">
-                                    <td className="py-1.5 px-2 text-center border-l-2 border-black">
-                                      <input
-                                        type="text"
-                                        value={obs.gradeClass}
-                                        onChange={(e) => {
-                                          const copy = [...auditObservations];
-                                          copy[idx].gradeClass = e.target.value;
-                                          setAuditObservations(copy);
-                                        }}
-                                        className="w-full px-1.5 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-bold"
-                                      />
-                                    </td>
-                                    <td className="py-1.5 px-2 border-l-2 border-black">
-                                      <input
-                                        type="text"
-                                        value={obs.tool}
-                                        onChange={(e) => {
-                                          const copy = [...auditObservations];
-                                          copy[idx].tool = e.target.value;
-                                          setAuditObservations(copy);
-                                        }}
-                                        className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
-                                      />
-                                    </td>
-                                    <td className="py-1.5 px-3">
-                                      <input
-                                        type="text"
-                                        value={obs.notes}
-                                        onChange={(e) => {
-                                          const copy = [...auditObservations];
-                                          copy[idx].notes = e.target.value;
-                                          setAuditObservations(copy);
-                                        }}
-                                        className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
-                                      />
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                            {/* Dual Side-by-Side Editing Cards */}
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                              {/* Right: Student Sample (6 Students) */}
+                              <div className="lg:col-span-5 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                                    <span>👥</span>
+                                    <span>{language === 'ar' ? '1. عينة الطلاب الستة (2 ممتاز، 2 متوسط، 2 متدني):' : '1. Student Sample (6 Students):'}</span>
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const defaults = [
+                                        'سالم بن أحمد الجنيبي',
+                                        'منى بنت عبدالله الوهيبية',
+                                        'سليمان بن علي الجنيبي',
+                                        'فاطمة بنت حميد المهرية',
+                                        'أحمد بن سعيد الوهيبي',
+                                        'مريم بنت حمد الجنيبية'
+                                      ];
+                                      setAuditStudents(prev => prev.map((s, idx) => ({ ...s, name: defaults[idx] || s.name })));
+                                    }}
+                                    className="text-[10px] font-bold text-teal-700 hover:text-teal-900"
+                                  >
+                                    {language === 'ar' ? 'ملء أسماء نموذجية' : 'Fill Sample Names'}
+                                  </button>
+                                </div>
+
+                                <div className="rounded-xl border-2 border-black bg-white shadow-xs overflow-hidden">
+                                  <table className="w-full text-right text-xs border-collapse">
+                                    <thead>
+                                      <tr className="bg-slate-200 text-black font-black border-b-2 border-black">
+                                        <th className="py-2.5 px-3 text-center border-l-2 border-black w-14 bg-slate-200">م</th>
+                                        <th className="py-2.5 px-3 text-center bg-slate-200">{language === 'ar' ? 'اسم الطالب' : 'Student Name'}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y-2 divide-black">
+                                      {auditStudents.slice(0, 6).map((stud, idx) => (
+                                        <tr key={`audit-cont-student-${stud.id || idx}-${idx}`} className="border-b-2 border-black last:border-0">
+                                          <td className="py-2 px-3 text-center font-black border-l-2 border-black bg-slate-200 text-black">
+                                            {stud.id || idx + 1}
+                                          </td>
+                                          <td className="py-1 px-2 bg-white">
+                                            <input
+                                              type="text"
+                                              value={stud.name}
+                                              onChange={(e) => {
+                                                const copy = [...auditStudents];
+                                                copy[idx].name = e.target.value;
+                                                setAuditStudents(copy);
+                                              }}
+                                              placeholder={language === 'ar' ? `اسم الطالب رقم (${idx + 1})` : `Student Name (${idx + 1})`}
+                                              className="w-full px-2.5 py-1.5 text-xs border border-transparent hover:border-slate-300 focus:border-teal-500 rounded bg-transparent font-bold text-slate-800"
+                                            />
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+
+                              {/* Left: Continuous Assessment Tools & Technical Observations */}
+                              <div className="lg:col-span-7 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-xs font-black text-slate-700 flex items-center gap-1.5">
+                                    <span>📝</span>
+                                    <span>{language === 'ar' ? '2. أدوات التقويم والملاحظات الفنية وجوانب التطوير (يكتبها الأستاذ أو يختارها):' : '2. Assessment Tools & Technical Observations:'}</span>
+                                  </label>
+                                  <span className="text-[10px] font-bold text-teal-700">
+                                    ✍️ {language === 'ar' ? 'اكتب أداتك بنفسك أو اختر من المقترحات' : 'Custom tools editable directly'}
+                                  </span>
+                                </div>
+
+                                <div className="rounded-xl border-2 border-black bg-white shadow-xs overflow-hidden">
+                                  <table className="w-full text-right text-xs border-collapse">
+                                    <thead>
+                                      <tr className="bg-slate-200 text-black font-black border-b-2 border-black">
+                                        <th className="py-2.5 px-3 text-center border-l-2 border-black w-48 bg-slate-200 leading-tight">
+                                          {language === 'ar' ? 'أدوات التقويم المستمر' : 'Assessment Tool'}
+                                        </th>
+                                        <th className="py-2.5 px-3 text-center bg-slate-200">
+                                          {language === 'ar' ? 'الملاحظات الفنية وجوانب التطوير' : 'Technical Notes & Development Aspects'}
+                                        </th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y-2 divide-black">
+                                      {auditObservations.slice(0, 4).map((obs, idx) => (
+                                        <tr key={`audit-cont-obs-${obs.id || idx}-${idx}`} className="border-b-2 border-black last:border-0">
+                                          <td className="p-2 text-center font-black border-l-2 border-black bg-slate-200 text-slate-900 text-xs align-top">
+                                            <div className="space-y-1.5">
+                                              <input
+                                                type="text"
+                                                value={obs.tool}
+                                                onChange={(e) => {
+                                                  const copy = [...auditObservations];
+                                                  copy[idx].tool = e.target.value;
+                                                  setAuditObservations(copy);
+                                                }}
+                                                placeholder={language === 'ar' ? 'اكتب اسم الأداة...' : 'Tool name...'}
+                                                className="w-full text-center font-black text-slate-950 bg-white border border-slate-300 focus:border-teal-600 focus:ring-1 focus:ring-teal-500 rounded px-2 py-1.5 text-xs shadow-2xs"
+                                              />
+                                              {/* Quick tool selector chips */}
+                                              <div className="flex flex-wrap items-center justify-center gap-1">
+                                                {[
+                                                  'اختبار قصير 1',
+                                                  'عرض شفوي',
+                                                  'سؤال قصير',
+                                                  'واجب منزلي',
+                                                  'اختبار قصير 2',
+                                                  'مشروع عملي',
+                                                  'مهمة تعليمية',
+                                                  'دفتر الطالب'
+                                                ].map((toolOption) => (
+                                                  <button
+                                                    key={`tool-chip-${idx}-${toolOption}`}
+                                                    type="button"
+                                                    onClick={() => {
+                                                      const copy = [...auditObservations];
+                                                      copy[idx].tool = toolOption;
+                                                      setAuditObservations(copy);
+                                                    }}
+                                                    className={`text-[9.5px] px-1.5 py-0.5 rounded transition-all cursor-pointer font-bold ${
+                                                      obs.tool === toolOption
+                                                        ? 'bg-teal-700 text-white shadow-2xs'
+                                                        : 'bg-white/80 hover:bg-white text-slate-700 border border-slate-300/80'
+                                                    }`}
+                                                  >
+                                                    {toolOption}
+                                                  </button>
+                                                ))}
+                                              </div>
+                                            </div>
+                                          </td>
+                                          <td className="p-2 bg-white space-y-1.5 align-top">
+                                            <textarea
+                                              rows={2}
+                                              value={obs.notes}
+                                              onChange={(e) => {
+                                                const copy = [...auditObservations];
+                                                copy[idx].notes = e.target.value;
+                                                setAuditObservations(copy);
+                                              }}
+                                              placeholder={language === 'ar' ? 'اكتب الملاحظات الفنية وجوانب التطوير لهذه الأداة، أو اتركها فارغة للكتابة اليدوية بالقلم الجاف عند الطباعة...' : 'Enter technical observations or leave blank for pen writing...'}
+                                              className="w-full px-2.5 py-1.5 text-xs text-slate-800 leading-relaxed font-sans border border-slate-200 focus:border-teal-500 rounded-lg resize-none"
+                                            />
+                                            {/* Quick suggestion chips */}
+                                            <div className="flex flex-wrap items-center gap-1">
+                                              {[
+                                                idx === 0 ? 'الأسئلة مصاغة بدقة وتراعي جداول المواصفات' : idx === 1 ? 'الأنشطة مكتملة وموثقة بكشوف رصد معتمدة' : idx === 2 ? 'كراسات الطلاب منتظمة ومصححة بانتظام' : 'رصد درجات أدوات التقويم مطابق للسجلات',
+                                                'مستوفٍ للمعايير والشروط الفنية'
+                                              ].map((phrase, pIdx) => (
+                                                <button
+                                                  key={`obs-phrase-${idx}-${pIdx}`}
+                                                  type="button"
+                                                  onClick={() => {
+                                                    const copy = [...auditObservations];
+                                                    const cur = copy[idx].notes.trim();
+                                                    copy[idx].notes = cur ? `${cur} • ${phrase}` : phrase;
+                                                    setAuditObservations(copy);
+                                                  }}
+                                                  className="text-[9.5px] bg-slate-100 hover:bg-teal-50 hover:text-teal-900 text-slate-600 px-2 py-0.5 rounded border border-slate-200 transition-colors cursor-pointer"
+                                                >
+                                                  + {phrase}
+                                                </button>
+                                              ))}
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          /* Grade 12 (Diploma): Moderation Table with Before/After + Reason Codes 1-6 & Observation Table */
+                          <div className="space-y-4 pt-3">
+                            <div className="space-y-2">
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1.5">
+                                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-sans">
+                                  {language === 'ar' ? '1. جدول عينة درجات ومطابقة الطلاب الستة - 2 ممتاز، 2 متوسط، 2 متدني (دبلوم التعليم العام)' : '1. Six-Student Sample Allocation Table (Grade 12)'}
+                                </label>
+                                <span className="text-[10.5px] font-bold text-indigo-700">
+                                  🛡️ {language === 'ar' ? 'يتضمن رصد التعديل وأسبابه لشهادة الدبلوم' : 'Grade moderation enabled for Diploma'}
+                                </span>
+                              </div>
+
+                              <div className="w-full rounded-xl border-2 border-black bg-white shadow-xs overflow-hidden">
+                                <table className="w-full text-right text-xs border-collapse">
+                                  <thead className="bg-slate-50 text-slate-600 font-black border-b-2 border-black">
+                                    <tr>
+                                      <th className="py-2.5 px-3 text-center border-l-2 border-black w-12 mr-0">م</th>
+                                      <th className="py-2.5 px-3 border-l-2 border-black">{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
+                                      <th className="py-2.5 px-3 border-l-2 border-black w-16 text-center">{language === 'ar' ? 'الصف' : 'Class'}</th>
+                                      <th className="py-2.5 px-3 border-l-2 border-black w-32">{language === 'ar' ? 'أداة التقييم' : 'Assessment Tool'}</th>
+                                      <th className="py-1 px-1 border-l-2 border-black w-28 text-center bg-slate-100/70" colSpan={2}>
+                                        <div className="flex items-center justify-center w-full font-black text-[13px] text-slate-800 py-0.5">{language === 'ar' ? 'الدرجة' : 'Grade'}</div>
+                                        <div className="grid grid-cols-2 text-[11px] border-t border-black/40 pt-0.5 font-black divide-x divide-x-reverse divide-black/40 bg-white/70">
+                                          <span className="text-slate-900 px-1 font-black">{language === 'ar' ? 'قبل' : 'Before'}</span>
+                                          <span className="text-slate-900 px-1 font-black">{language === 'ar' ? 'بعد' : 'After'}</span>
+                                        </div>
+                                      </th>
+                                      <th className="py-2.5 px-3 text-center font-black">{language === 'ar' ? 'سبب التعديل' : 'Modification Reason'}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y-2 divide-black">
+                                    {auditStudents.map((stud, idx) => (
+                                      <tr key={`audit-edit-student-${stud.id || idx}-${idx}`} className="hover:bg-slate-50/50 border-b-2 border-black last:border-0">
+                                        <td className="py-2 px-3 text-center font-bold border-l-2 border-black">{stud.id}</td>
+                                        <td className="py-1 px-2 border-l-2 border-black">
+                                          <input
+                                            type="text"
+                                            value={stud.name}
+                                            onChange={(e) => {
+                                              const copy = [...auditStudents];
+                                              copy[idx].name = e.target.value;
+                                              setAuditStudents(copy);
+                                            }}
+                                            className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
+                                          />
+                                        </td>
+                                        <td className="py-1 px-2 border-l-2 border-black text-center">
+                                          <input
+                                            type="text"
+                                            value={stud.gradeClass}
+                                            onChange={(e) => {
+                                              const copy = [...auditStudents];
+                                              copy[idx].gradeClass = e.target.value;
+                                              setAuditStudents(copy);
+                                            }}
+                                            className="w-full px-1 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
+                                          />
+                                        </td>
+                                        <td className="py-1 px-2 border-l-2 border-black">
+                                          <input
+                                            type="text"
+                                            value={stud.tool}
+                                            onChange={(e) => {
+                                              const copy = [...auditStudents];
+                                              copy[idx].tool = e.target.value;
+                                              setAuditStudents(copy);
+                                            }}
+                                            className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
+                                          />
+                                        </td>
+                                        <td className="py-1 px-2 border-l-2 border-black text-center">
+                                          <input
+                                            type="text"
+                                            value={stud.scoreBefore}
+                                            onChange={(e) => {
+                                              const copy = [...auditStudents];
+                                              const nextVal = e.target.value;
+                                              copy[idx].scoreBefore = nextVal;
+                                              if (nextVal.trim() === copy[idx].scoreAfter.trim()) {
+                                                copy[idx].reason = 'لا يوجد';
+                                              } else {
+                                                if (copy[idx].reason === 'لا يوجد' || !['1', '2', '3', '4', '5', '6'].includes(copy[idx].reason)) {
+                                                  copy[idx].reason = '1';
+                                                }
+                                              }
+                                              setAuditStudents(copy);
+                                            }}
+                                            className="w-full px-1 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-semibold text-slate-700"
+                                          />
+                                        </td>
+                                        <td className="py-1 px-2 border-l-2 border-black text-center">
+                                          <input
+                                            type="text"
+                                            value={stud.scoreAfter}
+                                            onChange={(e) => {
+                                              const copy = [...auditStudents];
+                                              const nextVal = e.target.value;
+                                              copy[idx].scoreAfter = nextVal;
+                                              if (copy[idx].scoreBefore.trim() === nextVal.trim()) {
+                                                copy[idx].reason = 'لا يوجد';
+                                              } else {
+                                                if (copy[idx].reason === 'لا يوجد' || !['1', '2', '3', '4', '5', '6'].includes(copy[idx].reason)) {
+                                                  copy[idx].reason = '1';
+                                                }
+                                              }
+                                              setAuditStudents(copy);
+                                            }}
+                                            className="w-full px-1 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-semibold text-[#821315]"
+                                          />
+                                        </td>
+                                        <td className="py-1 px-2">
+                                          {stud.scoreBefore.trim() === stud.scoreAfter.trim() ? (
+                                            <div className="w-full px-2 py-1 text-xs text-slate-500 bg-slate-50 border border-slate-100 rounded font-medium text-center font-sans">
+                                              {language === 'ar' ? 'لا يوجد تعديل (لا يوجد)' : 'No modification'}
+                                            </div>
+                                          ) : (
+                                            <select
+                                              value={['1', '2', '3', '4', '5', '6'].includes(stud.reason) ? stud.reason : '1'}
+                                              onChange={(e) => {
+                                                const copy = [...auditStudents];
+                                                copy[idx].reason = e.target.value;
+                                                setAuditStudents(copy);
+                                              }}
+                                              className="w-full px-2 py-1 text-xs border border-slate-200 focus:border-red-600 rounded bg-white text-slate-800 cursor-pointer font-sans font-medium"
+                                              style={{ direction: 'rtl' }}
+                                            >
+                                              <option value="1">1 - {language === 'ar' ? 'وجود خطأ في نقل درجة الطالب من أداة التقويم إلى سجل درجات المعلم' : '1 - Transfer error'}</option>
+                                              <option value="2">2 - {language === 'ar' ? 'وجود خطأ في رصد الدرجة في البوابة التعليمية' : '2 - Entry in portal error'}</option>
+                                              <option value="3">3 - {language === 'ar' ? 'وجود خطأ في التصحيح التقديري' : '3 - Underestimation error'}</option>
+                                              <option value="4">4 - {language === 'ar' ? 'وجود خطأ في جمع الدرجات سواءً كانت لأداة التقويم أو سجل درجات المعلم' : '4 - Row calculations/sum error'}</option>
+                                              <option value="5">5 - {language === 'ar' ? 'وجود خطأ في جبر درجة المجموع' : '5 - Rounding adjustment error'}</option>
+                                              <option value="6">6 - {language === 'ar' ? 'عدم توفر الدليل على أعمال الطلبة' : '6 - Absence of student work evidence'}</option>
+                                            </select>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+
+                            {/* Grade 12 Technical Observations Table */}
+                            <div className="space-y-2">
+                              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block font-sans">
+                                {language === 'ar' ? '2. الملاحظات الفنية الأساسية على كراسات وأدوات الفحص والتقويم (دبلوم التعليم العام)' : '2. Technical Remarks on Continuous Assessment Instruments (Grade 12)'}
+                              </label>
+                              <div className="overflow-x-auto rounded-xl border-2 border-black bg-white shadow-xs">
+                                <table className="w-full text-right text-xs">
+                                  <thead className="bg-slate-50 text-slate-800 font-bold border-b-2 border-black">
+                                    <tr>
+                                      <th className="py-2.5 px-3 border-l-2 border-black w-24 text-center">{language === 'ar' ? 'الصف' : 'Class'}</th>
+                                      <th className="py-2.5 px-3 border-l-2 border-black w-36">{language === 'ar' ? 'أداة التقويم المعنية' : 'Assessment Tool'}</th>
+                                      <th className="py-2.5 px-4">{language === 'ar' ? 'الملاحظات الفنية التفصيلية' : 'Technical Observations / Detailed Remarks'}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y-2 divide-black">
+                                    {auditObservations.map((obs, idx) => (
+                                      <tr key={`audit-edit-obs-${obs.id || idx}-${idx}`} className="hover:bg-slate-50/50 border-b-2 border-black last:border-0">
+                                        <td className="py-1.5 px-2 text-center border-l-2 border-black">
+                                          <input
+                                            type="text"
+                                            value={obs.gradeClass}
+                                            onChange={(e) => {
+                                              const copy = [...auditObservations];
+                                              copy[idx].gradeClass = e.target.value;
+                                              setAuditObservations(copy);
+                                            }}
+                                            className="w-full px-1.5 py-1 text-center text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-bold"
+                                          />
+                                        </td>
+                                        <td className="py-1.5 px-2 border-l-2 border-black">
+                                          <input
+                                            type="text"
+                                            value={obs.tool}
+                                            onChange={(e) => {
+                                              const copy = [...auditObservations];
+                                              copy[idx].tool = e.target.value;
+                                              setAuditObservations(copy);
+                                            }}
+                                            className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
+                                          />
+                                        </td>
+                                        <td className="py-1.5 px-3">
+                                          <input
+                                            type="text"
+                                            value={obs.notes}
+                                            onChange={(e) => {
+                                              const copy = [...auditObservations];
+                                              copy[idx].notes = e.target.value;
+                                              setAuditObservations(copy);
+                                            }}
+                                            className="w-full px-2 py-1 text-xs border border-transparent hover:border-slate-300 focus:border-indigo-500 rounded bg-transparent font-medium"
+                                          />
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Footer Signatures editing */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-slate-100">
@@ -4691,10 +5196,10 @@ export default function App() {
                         </h4>
                         
                         {/* Live paper container mimics actual printed A4 aspect ratio and styles */}
-                        <div className="overflow-x-auto rounded-3xl border border-slate-300 bg-slate-900/5 p-4 sm:p-6 shadow-inner block text-center">
+                        <div className="w-full overflow-x-auto rounded-3xl border border-slate-300 bg-slate-900/5 p-4 sm:p-6 shadow-inner block text-center" dir="rtl">
                           <div 
                             id="ministry-audit-form-preview"
-                            className="bg-white border-2 border-slate-350 shadow-xl p-6 sm:p-8 text-[#000] relative select-none font-sans w-[1150px] min-w-[1150px] shrink-0 mx-auto leading-relaxed text-right"
+                            className="bg-white border-2 border-slate-350 shadow-xl p-6 sm:p-8 text-[#000] relative select-none font-sans w-full max-w-full mx-auto leading-relaxed text-right"
                             style={{ direction: 'rtl' }}
                           >
                             {/* Inner elements */}
@@ -4754,7 +5259,7 @@ export default function App() {
                                 <div className="grid grid-cols-12 gap-3.5" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px' }}>
                                   
                                   {/* Form Specifications: col-span-5 */}
-                                  <div className="col-span-5 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between" style={{ width: '41.5%', flex: '0 0 41.5%', boxSizing: 'border-box' }}>
+                                  <div className="col-span-5 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between" style={{ width: '40%', flex: '0 0 40%', boxSizing: 'border-box' }}>
                                     <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
                                       {language === 'ar' ? 'بيانات استمارة الفحص والتدقيق المستمر' : 'Specification of Alignment'}
                                     </div>
@@ -4777,7 +5282,7 @@ export default function App() {
                                   </div>
 
                                   {/* Target Teacher Profile: col-span-7 */}
-                                  <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white" style={{ width: '57%', flex: '0 0 57%', boxSizing: 'border-box' }}>
+                                  <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white" style={{ width: '60%', flex: '0 0 60%', boxSizing: 'border-box' }}>
                                     <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
                                       {language === 'ar' ? 'بيانات المعلم المستهدف بالفحص والمتابعة' : 'Target Teacher General Bio-data'}
                                     </div>
@@ -4813,88 +5318,153 @@ export default function App() {
 
                                 </div>
 
-                                {/* Row 2: Side-by-side Grades Audit Ledger (Right col-span-5) & Technical Observations (Left col-span-7) */}
-                                <div className="grid grid-cols-12 gap-3.5" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px' }}>
-                                  
-                                  {/* Right col-span-5: Grades Audit Ledger */}
-                                  <div className="col-span-5 flex flex-col border-2 border-[#821315] rounded overflow-hidden bg-white" style={{ width: '41.5%', flex: '0 0 41.5%', boxSizing: 'border-box' }}>
-                                    <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
-                                      {language === 'ar' ? 'جدول رصد ومطابقة عينة درجات الطلاب والمشغولات الدراسية' : 'Student Sample Grades Moderation Ledger'}
-                                    </div>
-                                    <table className="w-full text-right text-[16px] border-collapse leading-normal" style={{ tableLayout: 'fixed', width: '100%' }}>
-                                      <thead>
-                                        <tr className="bg-[#821315]/5 text-[#821315] font-black text-[15px] border-b-2 border-[#821315]/45">
-                                          <th className="py-2 px-1.5 border-l border-[#821315]/45 text-center align-middle" style={{ width: '6%' }}>م</th>
-                                          <th className="py-2 px-3 border-l border-[#821315]/45 text-right align-middle" style={{ width: '32%' }}>{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
-                                          <th className="py-2 px-2 border-l border-[#821315]/45 text-center align-middle" style={{ width: '10%' }}>الصف</th>
-                                          <th className="py-2 px-3 border-l border-[#821315]/45 align-middle" style={{ width: '16%' }}>الأداة</th>
-                                          <th className="p-0 border-l border-[#821315]/45 text-center align-top" colSpan={2} style={{ width: '18%' }}>
-                                            <div className="flex flex-col w-full h-full">
-                                              <div className="flex items-center justify-center w-full font-black text-[15px] text-[#821315] py-1.5 border-b border-[#821315]/45">
-                                                {language === 'ar' ? 'الدرجة' : 'Grade'}
-                                              </div>
-                                              <div className="grid grid-cols-2 text-[14px] font-black h-full" style={{ display: 'flex', flexDirection: 'row', width: '100%' }}>
-                                                <div className="flex items-center justify-center border-l border-[#821315]/45 px-1 py-1.5 bg-[#821315]/10" style={{ width: '50%' }}>
-                                                  {language === 'ar' ? 'قبل' : 'Before'}
-                                                </div>
-                                                <div className="flex items-center justify-center px-1 py-1.5 bg-[#821315]/10" style={{ width: '50%' }}>
-                                                  {language === 'ar' ? 'بعد' : 'After'}
-                                                </div>
-                                              </div>
-                                            </div>
-                                          </th>
-                                          <th className="py-2 px-3 text-center border-l border-[#821315]/45 font-black text-[15px] text-[#821315] align-middle" style={{ width: '18%' }}>{language === 'ar' ? 'سبب التعديل' : 'Modification Reason'}</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-[#821315]/45 text-slate-700">
-                                        {auditStudents.map((s, idx) => (
-                                          <tr key={`audit-view-student-${s.id || idx}-${idx}`} className="hover:bg-slate-50/20">
-                                            <td className="py-2 px-1.5 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315] align-middle">{s.id}</td>
-                                            <td className="py-2.5 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words text-slate-800 align-middle">{s.name || '---'}</td>
-                                            <td className="py-2.5 px-2 border-l border-[#821315]/45 text-center font-semibold font-mono align-middle">{s.gradeClass}</td>
-                                            <td className="py-2.5 px-3 border-l border-[#821315]/45 whitespace-normal break-words font-bold text-slate-700 align-middle">{s.tool}</td>
-                                            <td className="py-2.5 px-1.5 border-l border-dashed border-[#821315]/45 text-center font-mono font-black text-black text-[15px] bg-slate-50 align-middle">{s.scoreBefore}</td>
-                                            <td className="py-2.5 px-1.5 border-l border-[#821315]/45 text-center font-mono font-black text-red-900 text-[15px] bg-red-50 align-middle">{s.scoreAfter}</td>
-                                            <td className="py-2.5 px-3 text-center font-bold whitespace-normal break-words text-[13px] text-slate-800 align-middle">
-                                              {['1', '2', '3', '4', '5', '6'].includes(s.reason?.trim() || '') ? (
-                                                <span className="font-mono text-[#821315] font-black text-[13px] bg-red-50/50 px-2 py-0.5 rounded">{s.reason}</span>
-                                              ) : (
-                                                <span className="text-black font-black block text-center text-[14px]">{s.reason === 'لا يوجد' || !s.reason ? (language === 'ar' ? 'لا يوجد' : 'None') : s.reason}</span>
-                                              )}
-                                            </td>
+                                {/* Row 2: Continuous Assessment Sample Tables (Grades 1-11) or Grade 12 Moderation Ledger */}
+                                {!isGrade12 ? (
+                                  /* Continuous Assessment (Grades 1-11): Side-by-Side Dual Tables matching official template */
+                                  <div className="flex flex-row gap-3.5 w-full my-1" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px' }}>
+                                    
+                                    {/* Right Table: Sample Students (6 rows) */}
+                                    <div style={{ width: '42%', flex: '0 0 42%', boxSizing: 'border-box' }} className="flex flex-col">
+                                      <table className="w-full text-right border-collapse border-2 border-black h-full" style={{ border: '2px solid black', width: '100%' }}>
+                                        <thead>
+                                          <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '2px solid black' }}>
+                                            <th className="py-2.5 px-2 border-l-2 border-black text-center text-[15px]" style={{ width: '15%', borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>م</th>
+                                            <th className="py-2.5 px-3 text-center text-[15px] font-black" style={{ backgroundColor: '#d1d5db' }}>اسم الطالب</th>
                                           </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
-                                  </div>
-
-                                  {/* Left col-span-7: Technical Observations */}
-                                  <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between" style={{ width: '57%', flex: '0 0 57%', boxSizing: 'border-box' }}>
-                                    <div className="bg-[#821315]/5 text-[#821315] px-3 py-1.5 text-[15px] font-black text-center border-b-2 border-[#821315] font-sans">
-                                      {language === 'ar' ? 'الملاحظات الفنية على أدوات التقويم المستمر - التقرير المعتمد للجنة' : 'Technical Observations / Audit Comments'}
+                                        </thead>
+                                        <tbody className="divide-y-2 divide-black">
+                                          {auditStudents.slice(0, 6).map((s, idx) => (
+                                            <tr key={`audit-view-sample-${idx}`} className="border-b-2 border-black last:border-b-0 h-[46px]" style={{ borderBottom: '2px solid black' }}>
+                                              <td className="py-2 px-2 text-center font-black text-[15px] text-black" style={{ borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
+                                                {s.id || idx + 1}
+                                              </td>
+                                              <td className="py-2 px-3 bg-white font-bold text-slate-900 text-[15px]">
+                                                {s.name || ''}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
                                     </div>
-                                    <table className="w-full text-right text-[16px] border-collapse leading-normal flex-1" style={{ tableLayout: 'fixed', width: '100%' }}>
-                                      <thead>
-                                        <tr className="bg-slate-50 text-slate-600 font-black text-[15px] border-b-2 border-[#821315]/45">
-                                          <th className="py-2 px-3 border-l border-[#821315]/45 text-center align-middle" style={{ width: '15%' }}>الصف</th>
-                                          <th className="py-2 px-3 border-l border-[#821315]/45 align-middle" style={{ width: '30%' }}>أداة التقويم</th>
-                                          <th className="py-2 px-3 align-middle" style={{ width: '55%' }}>موجز الملاحظات الفنية والوزارية</th>
-                                        </tr>
-                                      </thead>
-                                      <tbody className="divide-y divide-[#821315]/45 text-slate-700">
-                                        {auditObservations.map((obs, idx) => (
-                                          <tr key={`audit-view-obs-${obs.id || idx}-${idx}`} className="hover:bg-slate-50/20">
-                                            <td className="py-2.5 px-3 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315] align-middle">{obs.gradeClass}</td>
-                                            <td className="py-2.5 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words align-middle">{obs.tool}</td>
-                                            <td className="py-2.5 px-3 text-slate-950 font-black text-center whitespace-normal break-words leading-relaxed text-[15px] align-middle">{language === 'ar' ? `ملاحظة رقم ${obs.id}` : `Observation No. (${obs.id})`}</td>
+
+                                    {/* Left Table: Continuous Assessment Tools & Technical Notes (4 rows) */}
+                                    <div style={{ width: '58%', flex: '0 0 58%', boxSizing: 'border-box' }} className="flex flex-col">
+                                      <table className="w-full text-right border-collapse border-2 border-black h-full" style={{ border: '2px solid black', width: '100%' }}>
+                                        <thead>
+                                          <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '2px solid black' }}>
+                                            <th className="py-2 px-2 border-l-2 border-black text-center text-[14px] leading-tight font-black" style={{ width: '28%', borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
+                                              أدوات<br />التقويم<br />المستمر
+                                            </th>
+                                            <th className="py-2 px-3 text-center text-[15px] font-black" style={{ backgroundColor: '#d1d5db' }}>
+                                              الملاحظات الفنية وجوانب التطوير
+                                            </th>
                                           </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
+                                        </thead>
+                                        <tbody className="divide-y-2 divide-black">
+                                          {auditObservations.slice(0, 4).map((obs, idx) => (
+                                            <tr key={`audit-view-obs-${idx}`} className="border-b-2 border-black last:border-b-0 h-[69px]" style={{ borderBottom: '2px solid black' }}>
+                                              <td className="py-2 px-2 text-center font-black text-[13px] text-slate-950 leading-snug" style={{ borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
+                                                {obs.tool}
+                                              </td>
+                                              <td className="py-2.5 px-3 bg-white text-slate-900 text-[13.5px] leading-relaxed align-top font-medium">
+                                                {obs.notes ? (
+                                                  <div className="font-semibold text-slate-850 leading-relaxed whitespace-pre-wrap">{obs.notes}</div>
+                                                ) : (
+                                                  <div className="h-full min-h-[48px] flex items-center justify-center text-slate-300 text-xs italic select-none">
+                                                    {/* Blank space for handwritten notes */}
+                                                  </div>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
+
                                   </div>
+                                ) : (
+                                  /* Grade 12 (Diploma): Dual Ledger and Observations Table */
+                                  <div className="grid grid-cols-12 gap-3.5" style={{ display: 'flex', flexDirection: 'column', width: '100%', gap: '14px' }}>
+                                    
+                                    {/* Right col-span-5: Grade 12 Moderation Ledger */}
+                                    <div className="col-span-5 flex flex-col border-2 border-[#821315] rounded overflow-hidden bg-white" style={{ width: '100%', flex: '0 0 100%', boxSizing: 'border-box' }}>
+                                      <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
+                                        {language === 'ar' ? 'جدول رصد ومطابقة عينة درجات الطلاب والمشغولات الدراسية (دبلوم التعليم العام)' : 'Student Sample Grades Moderation Ledger (Grade 12)'}
+                                      </div>
+                                      <table className="w-full text-right text-[16px] border-collapse leading-normal" style={{ tableLayout: 'fixed', width: '100%' }}>
+                                        <thead>
+                                          <tr className="bg-[#821315]/5 text-[#821315] font-black text-[15px] border-b-2 border-[#821315]/45">
+                                            <th className="py-2 px-1.5 border-l border-[#821315]/45 text-center align-middle" style={{ width: '6%' }}>م</th>
+                                            <th className="py-2 px-3 border-l border-[#821315]/45 text-right align-middle" style={{ width: '32%' }}>{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
+                                            <th className="py-2 px-2 border-l border-[#821315]/45 text-center align-middle" style={{ width: '10%' }}>الصف</th>
+                                            <th className="py-2 px-3 border-l border-[#821315]/45 align-middle" style={{ width: '16%' }}>الأداة</th>
+                                            <th className="p-0 border-l border-[#821315]/45 text-center align-top" colSpan={2} style={{ width: '18%' }}>
+                                              <div className="flex flex-col w-full h-full">
+                                                <div className="flex items-center justify-center w-full font-black text-[15px] text-[#821315] py-1.5 border-b border-[#821315]/45">
+                                                  {language === 'ar' ? 'الدرجة' : 'Grade'}
+                                                </div>
+                                                <div className="grid grid-cols-2 text-[14px] font-black h-full" style={{ display: 'flex', flexDirection: 'row', width: '100%' }}>
+                                                  <div className="flex items-center justify-center border-l border-[#821315]/45 px-1 py-1.5 bg-[#821315]/10" style={{ width: '50%' }}>
+                                                    {language === 'ar' ? 'قبل' : 'Before'}
+                                                  </div>
+                                                  <div className="flex items-center justify-center px-1 py-1.5 bg-[#821315]/10" style={{ width: '50%' }}>
+                                                    {language === 'ar' ? 'بعد' : 'After'}
+                                                  </div>
+                                                </div>
+                                              </div>
+                                            </th>
+                                            <th className="py-2 px-3 text-center border-l border-[#821315]/45 font-black text-[15px] text-[#821315] align-middle" style={{ width: '18%' }}>{language === 'ar' ? 'سبب التعديل' : 'Modification Reason'}</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-[#821315]/45 text-slate-700">
+                                          {auditStudents.map((s, idx) => (
+                                            <tr key={`audit-view-student-${s.id || idx}-${idx}`} className="hover:bg-slate-50/20">
+                                              <td className="py-2 px-1.5 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315] align-middle">{s.id}</td>
+                                              <td className="py-2.5 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words text-slate-800 align-middle">{s.name || '---'}</td>
+                                              <td className="py-2.5 px-2 border-l border-[#821315]/45 text-center font-semibold font-mono align-middle">{s.gradeClass}</td>
+                                              <td className="py-2.5 px-3 border-l border-[#821315]/45 whitespace-normal break-words font-bold text-slate-700 align-middle">{s.tool}</td>
+                                              <td className="py-2.5 px-1.5 border-l border-dashed border-[#821315]/45 text-center font-mono font-black text-black text-[15px] bg-slate-50 align-middle">{s.scoreBefore}</td>
+                                              <td className="py-2.5 px-1.5 border-l border-[#821315]/45 text-center font-mono font-black text-red-900 text-[15px] bg-red-50 align-middle">{s.scoreAfter}</td>
+                                              <td className="py-2.5 px-3 text-center font-bold whitespace-normal break-words text-[13px] text-slate-800 align-middle">
+                                                {['1', '2', '3', '4', '5', '6'].includes(s.reason?.trim() || '') ? (
+                                                  <span className="font-mono text-[#821315] font-black text-[13px] bg-red-50/50 px-2 py-0.5 rounded">{s.reason}</span>
+                                                ) : (
+                                                  <span className="text-black font-black block text-center text-[14px]">{s.reason === 'لا يوجد' || !s.reason ? (language === 'ar' ? 'لا يوجد' : 'None') : s.reason}</span>
+                                                )}
+                                              </td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
 
-                                </div>
+                                    {/* Left col-span-7: Grade 12 Technical Observations Table */}
+                                    <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between" style={{ width: '100%', flex: '0 0 100%', boxSizing: 'border-box' }}>
+                                      <div className="bg-[#821315]/5 text-[#821315] px-3 py-1.5 text-[15px] font-black text-center border-b-2 border-[#821315] font-sans">
+                                        {language === 'ar' ? 'الملاحظات الفنية على أدوات التقويم المستمر - التقرير المعتمد للجنة' : 'Technical Observations / Audit Comments (Grade 12)'}
+                                      </div>
+                                      <table className="w-full text-right text-[16px] border-collapse leading-normal flex-1" style={{ tableLayout: 'fixed', width: '100%' }}>
+                                        <thead>
+                                          <tr className="bg-slate-50 text-slate-600 font-black text-[15px] border-b-2 border-[#821315]/45">
+                                            <th className="py-2 px-3 border-l border-[#821315]/45 text-center align-middle" style={{ width: '15%' }}>الصف</th>
+                                            <th className="py-2 px-3 border-l border-[#821315]/45 align-middle" style={{ width: '30%' }}>أداة التقويم</th>
+                                            <th className="py-2 px-3 align-middle" style={{ width: '55%' }}>موجز الملاحظات الفنية والوزارية</th>
+                                          </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-[#821315]/45 text-slate-700">
+                                          {auditObservations.map((obs, idx) => (
+                                            <tr key={`audit-view-obs-${obs.id || idx}-${idx}`} className="hover:bg-slate-50/20">
+                                              <td className="py-2.5 px-3 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315] align-middle">{obs.gradeClass}</td>
+                                              <td className="py-2.5 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words align-middle">{obs.tool}</td>
+                                              <td className="py-2.5 px-3 text-slate-950 font-black text-center whitespace-normal break-words leading-relaxed text-[15px] align-middle">{language === 'ar' ? `ملاحظة رقم ${obs.id}` : `Observation No. (${obs.id})`}</td>
+                                            </tr>
+                                          ))}
+                                        </tbody>
+                                      </table>
+                                    </div>
 
+                                  </div>
+                                )}
                                 {/* Beautiful Bottom Footer Bar with Suggested Program and sequential signatures */}
                                 <div className="border border-[#821315] rounded bg-white">
                                   <div className="flex w-full text-[16px]" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%' }}>
@@ -5053,18 +5623,110 @@ export default function App() {
                       </div>
                       <LogsTimeline logs={activityLogs} language={language} />
                     </div>
-
-                    </div>
                   </div>
-                )}
-
-              </div>
-
+                </div>
+              )}
             </div>
+          ) : (
+              <div className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-md space-y-6 animate-in fade-in duration-200" dir="rtl">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-150 pb-4">
+                  <div className="space-y-1 text-right">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200/60 rounded-full text-[10.5px] font-black uppercase">
+                      💬 {language === 'ar' ? 'قوائم المحادثات المباشرة' : 'Live Teacher Audit Chats'}
+                    </span>
+                    <h3 className="text-base sm:text-lg font-bold font-heading text-slate-900">
+                      {language === 'ar' 
+                        ? `قائمة المحادثات مع المعلمين - ${selectedModeratorSchool || 'كافة المدارس'}` 
+                        : `Teachers Chat List - ${selectedModeratorSchool || 'All Schools'}`}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-medium font-sans">
+                      {language === 'ar' 
+                        ? 'اختر المعلم لبدء محادثة الواتساب المباشرة واستعراض الملفات المرفوعة واستمارة التدقيق المعتمدة' 
+                        : 'Select a teacher to open direct WhatsApp audit chat and review continuous appraisal forms'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Teachers list for selected school */}
+                <div className="space-y-3">
+                  {(() => {
+                    const targetSchoolAssessments = filteredAssessments.filter(a => !selectedModeratorSchool || a.schoolName === selectedModeratorSchool);
+                    const teacherNames = Array.from(new Set(targetSchoolAssessments.map(a => formatCleanTeacherName(a.teacherName, a.schoolEmail)).filter(Boolean)));
+
+                    if (teacherNames.length === 0) {
+                      return (
+                        <div className="text-center py-16 space-y-3 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200 p-6">
+                          <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center mx-auto text-slate-300 shadow-xs border border-slate-100">
+                            <ClipboardList className="w-7 h-7 stroke-[1.2]" />
+                          </div>
+                          <div className="space-y-1">
+                            <h4 className="font-bold text-slate-700 text-sm">
+                              {language === 'ar' ? 'لا توجد محادثات معلمين متوفرة حالياً' : 'No teacher conversations found'}
+                            </h4>
+                            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                              {language === 'ar' 
+                                ? 'يرجى اختيار مدرسة أخرى من قائمة المدارس على اليمين لرؤية معلّميها ومحادثاتهم المباشرة.' 
+                                : 'Please select another school from the right column list.'}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    return teacherNames.map((tName, tIdx) => {
+                      const tUploads = targetSchoolAssessments.filter(a => formatCleanTeacherName(a.teacherName, a.schoolEmail) === tName || a.teacherName === tName || a.schoolEmail === tName);
+                      const firstItem = tUploads[0];
+                      const subjDisplay = firstItem ? translateSubject(firstItem.subject, language) : (userProfile.subject || 'الرياضيات');
+
+                      return (
+                        <div
+                          key={`teacher-chat-card-${tIdx}`}
+                          onClick={() => setSelectedModeratorTeacher(tName)}
+                          className="p-4.5 bg-gradient-to-r from-white to-slate-50/40 hover:from-emerald-50/30 hover:to-white border border-slate-200/90 hover:border-emerald-500/80 rounded-2xl cursor-pointer transition-all flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-2xs hover:shadow-md hover:scale-[1.005] group"
+                        >
+                          <div className="flex items-center gap-3.5">
+                            <div className="w-12 h-12 rounded-2xl bg-emerald-100/70 border border-emerald-200/80 flex items-center justify-center text-emerald-900 text-xl font-black shrink-0 shadow-2xs group-hover:scale-105 transition-transform">
+                              👨‍🏫
+                            </div>
+                            <div className="space-y-1 text-right">
+                              <h4 className="font-extrabold text-slate-900 text-sm sm:text-base group-hover:text-emerald-950 transition-colors">
+                                {tName}
+                              </h4>
+                              <div className="flex items-center gap-2 text-xs text-slate-500 font-medium flex-wrap">
+                                <span className="bg-emerald-50 text-emerald-800 px-2 py-0.5 rounded-md font-bold text-[10.5px]">
+                                  {subjDisplay}
+                                </span>
+                                <span>•</span>
+                                <span className="text-slate-600 font-bold">
+                                  {tUploads.length} {language === 'ar' ? 'ملفات مرفوعة' : 'Uploaded Files'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedModeratorTeacher(tName);
+                            }}
+                            className="w-full sm:w-auto px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-black text-xs rounded-xl cursor-pointer shadow-sm hover:shadow-md transition-all flex items-center justify-center gap-2"
+                          >
+                            <span>💬 {language === 'ar' ? 'فتح المحادثة والملفات' : 'Open WhatsApp Chat'}</span>
+                          </button>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
             )}
 
+            </div>
           </div>
-          )}
+        )}
+        </div>
+        )}
 
           {/* OTHER PORTAL VIEW TABS */}
           {activeTab === 'databases' && (
@@ -5497,81 +6159,142 @@ export default function App() {
             <div className="grid grid-cols-12 gap-3.5 flex-1">
               
               {/* Right col-span-5: Grades Audit Ledger */}
-              <div className="col-span-5 flex flex-col border border-slate-400 rounded overflow-hidden font-sans">
-                <table className="w-full text-right text-[8.5px] border-collapse leading-tight flex-1">
-                  <thead>
-                    <tr className="bg-slate-100 text-[#821315] font-black text-[8.5px] border-b border-[#000]">
-                      <th className="py-1 px-1 border-l border-slate-300 text-center w-8 align-middle">م</th>
-                      <th className="py-1 px-2 border-l border-slate-300 text-right w-36 align-middle">{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
-                      <th className="py-1 px-1.5 border-l border-slate-300 text-center w-12 align-middle">الصف</th>
-                      <th className="py-1 px-2 border-l border-slate-300 w-18 align-middle">الأداة</th>
-                      <th className="p-0 border-l border-slate-300 text-center w-24 align-top" colSpan={2}>
-                        <div className="flex flex-col w-full h-full bg-slate-200">
-                          <div className="flex items-center justify-center w-full font-black text-[12px] text-black py-0.5 border-b border-slate-300">
-                            {language === 'ar' ? 'الدرجة' : 'Grade'}
-                          </div>
-                          <div className="grid grid-cols-2 text-[10px] font-black h-full">
-                            <div className="flex items-center justify-center border-l border-slate-300 px-1 py-0.5">
-                              {language === 'ar' ? 'قبل' : 'Before'}
-                            </div>
-                            <div className="flex items-center justify-center px-1 py-0.5">
-                              {language === 'ar' ? 'بعد' : 'After'}
-                            </div>
-                          </div>
-                        </div>
-                      </th>
-                      <th className="py-1 px-2 text-center border-l border-slate-300 font-black text-[11px] text-[#821315] align-middle">{language === 'ar' ? 'سبب التعديل' : 'Modification Reason'}</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#000] text-slate-900">
-                    {auditStudents.map((s, idx) => (
-                      <tr key={`audit-print-student-${s.id || idx}-${idx}`} className="bg-white">
-                        <td className="py-1 px-1 border-l border-slate-300 text-center font-normal bg-slate-50 text-[#821315]">{s.id}</td>
-                        <td className="py-1 px-2 border-l border-slate-300 font-normal whitespace-normal break-words text-slate-700">{s.name || '---'}</td>
-                        <td className="py-1 px-1.5 border-l border-slate-300 text-center font-normal font-mono text-slate-600">{s.gradeClass}</td>
-                        <td className="py-1 px-2 border-l border-slate-300 whitespace-normal break-words font-normal text-slate-700">{s.tool}</td>
-                        <td className="py-1 px-0.5 border-l border-dashed border-slate-300 text-center font-mono font-black text-black text-[9px] bg-slate-50 w-12">{s.scoreBefore}</td>
-                        <td className="py-1 px-0.5 border-l border-slate-300 text-center font-mono font-black text-red-900 text-[9.5px] bg-red-100/30 w-12">{s.scoreAfter}</td>
-                        <td className="py-1 px-2 text-center border-l border-slate-300 font-bold whitespace-normal break-words text-[9.5px] text-slate-800">
-                          {['1', '2', '3', '4', '5', '6'].includes(s.reason?.trim() || '') ? (
-                            <span className="font-mono text-[#821315] font-black text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">{s.reason}</span>
-                          ) : (
-                            <span className="text-black font-black block text-center text-[9.5px]">{s.reason === 'لا يوجد' || !s.reason ? (language === 'ar' ? 'لا يوجد' : 'None') : s.reason}</span>
-                          )}
-                        </td>
+              <div className="col-span-5 flex flex-col border border-black rounded overflow-hidden font-sans">
+                {!isGrade12 ? (
+                  /* Grades 1-11: Official Student Sample Table (م and اسم الطالب) */
+                  <table className="w-full text-right text-[9px] border-collapse leading-tight flex-1" style={{ border: '1.5px solid black' }}>
+                    <thead>
+                      <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '1.5px solid black' }}>
+                        <th className="py-1 px-1 border-l border-black text-center text-[9px] font-black" style={{ width: '15%', borderLeft: '1.5px solid black', backgroundColor: '#d1d5db' }}>م</th>
+                        <th className="py-1 px-2 text-center text-[9.5px] font-black" style={{ backgroundColor: '#d1d5db' }}>اسم الطالب</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {auditStudents.slice(0, 6).map((s, idx) => (
+                        <tr key={`audit-print-cont-student-${idx}`} style={{ borderBottom: '1px solid black', height: '23px' }}>
+                          <td className="py-0.5 px-1 text-center font-black text-[9px] text-black" style={{ borderLeft: '1.5px solid black', backgroundColor: '#d1d5db' }}>
+                            {s.id || idx + 1}
+                          </td>
+                          <td className="py-0.5 px-2 bg-white font-bold text-slate-900 text-[9px]">
+                            {s.name || ''}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  /* Grade 12 Table */
+                  <table className="w-full text-right text-[8.5px] border-collapse leading-tight flex-1">
+                    <thead>
+                      <tr className="bg-slate-100 text-[#821315] font-black text-[8.5px] border-b border-[#000]">
+                        <th className="py-1 px-1 border-l border-slate-300 text-center w-8 align-middle">م</th>
+                        <th className="py-1 px-2 border-l border-slate-300 text-right w-36 align-middle">{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
+                        <th className="py-1 px-1.5 border-l border-slate-300 text-center w-12 align-middle">الصف</th>
+                        <th className="py-1 px-2 border-l border-slate-300 w-18 align-middle">الأداة</th>
+                        <th className="p-0 border-l border-slate-300 text-center w-24 align-top" colSpan={2}>
+                          <div className="flex flex-col w-full h-full bg-slate-200">
+                            <div className="flex items-center justify-center w-full font-black text-[12px] text-black py-0.5 border-b border-slate-300">
+                              {language === 'ar' ? 'الدرجة' : 'Grade'}
+                            </div>
+                            <div className="grid grid-cols-2 text-[10px] font-black h-full">
+                              <div className="flex items-center justify-center border-l border-slate-300 px-1 py-0.5">
+                                {language === 'ar' ? 'قبل' : 'Before'}
+                              </div>
+                              <div className="flex items-center justify-center px-1 py-0.5">
+                                {language === 'ar' ? 'بعد' : 'After'}
+                              </div>
+                            </div>
+                          </div>
+                        </th>
+                        <th className="py-1 px-2 text-center border-l border-slate-300 font-black text-[11px] text-[#821315] align-middle">{language === 'ar' ? 'سبب التعديل' : 'Modification Reason'}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[#000] text-slate-900">
+                      {auditStudents.map((s, idx) => (
+                        <tr key={`audit-print-student-${s.id || idx}-${idx}`} className="bg-white">
+                          <td className="py-1 px-1 border-l border-slate-300 text-center font-normal bg-slate-50 text-[#821315]">{s.id}</td>
+                          <td className="py-1 px-2 border-l border-slate-300 font-normal whitespace-normal break-words text-slate-700">{s.name || '---'}</td>
+                          <td className="py-1 px-1.5 border-l border-slate-300 text-center font-normal font-mono text-slate-600">{s.gradeClass}</td>
+                          <td className="py-1 px-2 border-l border-slate-300 whitespace-normal break-words font-normal text-slate-700">{s.tool}</td>
+                          <td className="py-1 px-0.5 border-l border-dashed border-slate-300 text-center font-mono font-black text-black text-[9px] bg-slate-50 w-12">{s.scoreBefore}</td>
+                          <td className="py-1 px-0.5 border-l border-slate-300 text-center font-mono font-black text-red-900 text-[9.5px] bg-red-100/30 w-12">{s.scoreAfter}</td>
+                          <td className="py-1 px-2 text-center border-l border-slate-300 font-bold whitespace-normal break-words text-[9.5px] text-slate-800">
+                            {['1', '2', '3', '4', '5', '6'].includes(s.reason?.trim() || '') ? (
+                              <span className="font-mono text-[#821315] font-black text-[11.5px] bg-slate-100 px-1 py-0.5 rounded">{s.reason}</span>
+                            ) : (
+                              <span className="text-black font-black block text-center text-[9.5px]">{s.reason === 'لا يوجد' || !s.reason ? (language === 'ar' ? 'لا يوجد' : 'None') : s.reason}</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
-              {/* Left col-span-7: Technical Observations */}
-              <div className="col-span-7 border border-slate-400 rounded overflow-hidden flex flex-col justify-between">
-                <div className="bg-slate-100 text-[#821315] px-2 py-0.5 text-[8.5px] font-black text-center border-b border-slate-300">
-                  {language === 'ar' ? 'الملاحظات الفنية على أدوات التقويم المستمر - التقرير المعتمد للجنة الوزارية' : 'Technical Observations / Audit Comments'}
-                </div>
-                <table className="w-full text-right text-[8.5px] border-collapse leading-tight flex-1">
-                  <thead>
-                    <tr className="bg-slate-50 text-slate-650 font-black text-[8px] border-b border-slate-300">
-                      <th className="py-1 px-2 border-l border-slate-300 text-center w-20">الصف</th>
-                      <th className="py-1 px-2 border-l border-slate-300 w-48">أداة التقويم</th>
-                      <th className="py-1 px-2">موجز الملاحظات الوزارية والفنية</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-300 text-slate-900 bg-white">
-                    {auditObservations.map((obs, idx) => (
-                      <tr key={`audit-print-obs-${obs.id || idx}-${idx}`}>
-                        <td className="py-1 px-2 border-l border-slate-300 text-center font-normal bg-slate-50 text-[#831215]">{obs.gradeClass}</td>
-                        <td className="py-1 px-2 border-l border-slate-300 font-normal whitespace-normal break-words text-slate-700">{obs.tool}</td>
-                        <td className="py-1 px-2 text-slate-950 font-black text-center whitespace-normal break-words leading-relaxed text-[11px]">{language === 'ar' ? `ملاحظة رقم ${obs.id}` : `Observation No. (${obs.id})`}</td>
+              {/* Left col-span-7: Technical Observations & Continuous Assessment Tools */}
+              <div className="col-span-7 border border-black rounded overflow-hidden flex flex-col justify-between">
+                {!isGrade12 ? (
+                  /* Grades 1-11 Print: Assessment Tools & Technical Observations Table */
+                  <table className="w-full text-right text-[9px] border-collapse leading-tight flex-1" style={{ border: '1.5px solid black' }}>
+                    <thead>
+                      <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '1.5px solid black' }}>
+                        <th className="py-1 px-1 border-l border-black text-center text-[8.5px] leading-tight font-black" style={{ width: '28%', borderLeft: '1.5px solid black', backgroundColor: '#d1d5db' }}>
+                          أدوات<br />التقويم<br />المستمر
+                        </th>
+                        <th className="py-1 px-2 text-center text-[9.5px] font-black" style={{ backgroundColor: '#d1d5db' }}>
+                          الملاحظات الفنية وجوانب التطوير
+                        </th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {auditObservations.slice(0, 4).map((obs, idx) => (
+                        <tr key={`audit-print-cont-obs-${idx}`} style={{ borderBottom: '1px solid black', height: '34.5px' }}>
+                          <td className="py-1 px-1 text-center font-black text-[8px] text-slate-950 leading-snug" style={{ borderLeft: '1.5px solid black', backgroundColor: '#d1d5db' }}>
+                            {obs.tool}
+                          </td>
+                          <td className="py-1 px-2 bg-white text-slate-900 text-[8.5px] leading-snug align-top">
+                            {obs.notes ? (
+                              <div className="font-semibold text-slate-850 leading-tight whitespace-pre-wrap">{obs.notes}</div>
+                            ) : (
+                              <div className="h-full min-h-[24px]">
+                                {/* Space for handwriting */}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  /* Grade 12 Table */
+                  <>
+                    <div className="bg-slate-100 text-[#821315] px-2 py-0.5 text-[8.5px] font-black text-center border-b border-slate-300">
+                      {language === 'ar' ? 'الملاحظات الفنية على أدوات التقويم المستمر - التقرير المعتمد للجنة الوزارية' : 'Technical Observations / Audit Comments (Grade 12)'}
+                    </div>
+                    <table className="w-full text-right text-[8.5px] border-collapse leading-tight flex-1">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-650 font-black text-[8px] border-b border-slate-300">
+                          <th className="py-1 px-2 border-l border-slate-300 text-center w-20">الصف</th>
+                          <th className="py-1 px-2 border-l border-slate-300 w-48">أداة التقويم</th>
+                          <th className="py-1 px-2">موجز الملاحظات الوزارية والفنية</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-300 text-slate-900 bg-white">
+                        {auditObservations.map((obs, idx) => (
+                          <tr key={`audit-print-obs-${obs.id || idx}-${idx}`}>
+                            <td className="py-1 px-2 border-l border-slate-300 text-center font-normal bg-slate-50 text-[#831215]">{obs.gradeClass}</td>
+                            <td className="py-1 px-2 border-l border-slate-300 font-normal whitespace-normal break-words text-slate-700">{obs.tool}</td>
+                            <td className="py-1 px-2 text-slate-950 font-black text-center whitespace-normal break-words leading-relaxed text-[11px]">{language === 'ar' ? `ملاحظة رقم ${obs.id}` : `Observation No. (${obs.id})`}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </>
+                )}
               </div>
 
             </div>
-
           </div>
 
           {/* Beautiful Bottom Footer Bar */}

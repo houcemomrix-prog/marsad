@@ -19,6 +19,20 @@ export interface UserProfile {
 
 export type AssessmentStatus = 'Pending' | 'In Progress' | 'Approved' | 'Revision Request' | 'Grade Revision';
 
+export interface SchoolInspectionPlan {
+  id: string;
+  schoolId: string;
+  schoolName: string;
+  inspectionDate: string; // YYYY-MM-DD
+  adminUnlocked: boolean; // Step 2a: System Admin unlocked upload permission
+  principalUnlocked: boolean; // Step 2b: School Principal unlocked upload permission for teachers
+  adminUnlockedAt?: string;
+  principalUnlockedAt?: string;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Assessment {
   id: string;
   title: string;
@@ -29,6 +43,11 @@ export interface Assessment {
   questions: string;      // The actual questions/text of the test
   keyAnswer: string;      // Marked marking schemes / answers
   status: AssessmentStatus;
+  workflowStage?: 'teacher_submitted' | 'principal_approved' | 'admin_dispatched' | 'completed';
+  principalApprovedAt?: string;
+  principalApprovedBy?: string;
+  adminDispatchedAt?: string;
+  adminDispatchedBy?: string;
   schoolId: string;
   schoolName: string;
   schoolEmail: string;

@@ -24,7 +24,8 @@ import {
   Palette,
   Check,
   Key,
-  ArrowLeftRight
+  ArrowLeftRight,
+  Calendar
 } from 'lucide-react';
 import { UserProfile, SchoolReport, TeacherNotification, isDualRoleAccount } from '../types';
 import { getTranslatedText, Language, translateSubject } from '../lib/translations';
@@ -107,8 +108,8 @@ interface HeaderProps {
   setActiveTab?: (tab: 'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases') => void;
   showUploadForm?: boolean;
   setShowUploadForm?: (show: boolean) => void;
-  adminTab?: 'catalog' | 'stats' | 'database' | 'schools' | 'stamps' | 'signatures' | 'design';
-  setAdminTab?: (tab: 'catalog' | 'stats' | 'database' | 'schools' | 'stamps' | 'signatures' | 'design') => void;
+  adminTab?: 'catalog' | 'stats' | 'plan' | 'database' | 'schools' | 'stamps' | 'signatures' | 'design';
+  setAdminTab?: (tab: 'catalog' | 'stats' | 'plan' | 'database' | 'schools' | 'stamps' | 'signatures' | 'design') => void;
   onLogoClick?: () => void;
   onChangePassword?: () => void;
   onToggleDualRole?: () => void;
@@ -1089,6 +1090,41 @@ export function Header({
                       <span className="w-2 h-2 rounded-full bg-[#0b5e32]"></span>
                     )}
                   </button>
+
+                  {/* INSPECTION PLAN & PERMISSIONS (for admin only) */}
+                  {userProfile.role === 'admin' && (
+                    <button
+                      type="button"
+                      id="hamburger-admin-plan-btn"
+                      onClick={() => {
+                        setActiveTab?.('overview');
+                        setAdminTab?.('plan');
+                        setIsOpen(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        activeTab === 'overview' && adminTab === 'plan'
+                          ? 'bg-emerald-50 text-[#0b5e32] border border-emerald-300 shadow-xs'
+                          : 'text-slate-700 hover:text-[#0b5e32] hover:bg-slate-50 border border-slate-200/70'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`p-1.5 rounded-lg ${
+                          activeTab === 'overview' && adminTab === 'plan'
+                            ? 'bg-[#0b5e32] text-white'
+                            : 'bg-amber-100 text-amber-800'
+                        }`}>
+                          <Calendar className="w-4 h-4" />
+                        </div>
+                        <div className="text-right rtl:text-right ltr:text-left">
+                          <span className="block">{language === 'en' ? 'Inspection Plan & Permissions' : 'خطة الفحص والصلاحيات'}</span>
+                          <span className="text-[10px] text-amber-700 font-normal block">{language === 'en' ? 'Grant school upload permissions' : 'فتح الصلاحية للمدارس وتحديد المواعيد'}</span>
+                        </div>
+                      </div>
+                      {activeTab === 'overview' && adminTab === 'plan' && (
+                        <span className="w-2 h-2 rounded-full bg-[#0b5e32]"></span>
+                      )}
+                    </button>
+                  )}
 
                   {/* CENTRAL DATABASES HUB (for admin only) */}
                   {userProfile.role === 'admin' && (

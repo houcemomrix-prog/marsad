@@ -25,7 +25,13 @@ import {
 } from 'lucide-react';
 import { UserProfile, Assessment } from '../types';
 import { Language, translateGrade, translateSubject, translateStatus } from '../lib/translations';
-import { getAllUserProfiles, createTeacherNotification } from '../services/db';
+import { 
+  getAllUserProfiles, 
+  createTeacherNotification, 
+  getSchoolUploadPermissionStatus, 
+  togglePrincipalUploadPermission, 
+  approveAssessmentByPrincipal 
+} from '../services/db';
 import { Badge } from './Badge';
 import { OMAN_WUSTA_SCHOOLS } from '../data/schoolsData';
 
@@ -63,6 +69,7 @@ interface SchoolPrincipalObserverProps {
   language: Language;
   onInspect: (assessment: Assessment) => void;
   onSuccess: (msg: string) => void;
+  onError?: (msg: string) => void;
 }
 
 interface TeacherStatus {
@@ -77,7 +84,8 @@ export function SchoolPrincipalObserver({
   assessments,
   language,
   onInspect,
-  onSuccess
+  onSuccess,
+  onError
 }: SchoolPrincipalObserverProps) {
   const [teachers, setTeachers] = useState<TeacherStatus[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -247,6 +255,73 @@ export function SchoolPrincipalObserver({
       return matchSearch && matchSubject && matchStatus;
     });
 
+  const [permissionStatus, setPermissionStatus] = useState<{
+    adminUnlocked: boolean;
+    principalUnlocked: boolean;
+    canTeacherUpload: boolean;
+    inspectionDate: string;
+  }>({
+    adminUnlocked: false,
+    principalUnlocked: false,
+    canTeacherUpload: false,
+    inspectionDate: ''
+  });
+  const [permissionLoading, setPermissionLoading] = useState(false);
+
+  const fetchPermissions = async () => {
+    try {
+      const perm = await getSchoolUploadPermissionStatus(principalSchool);
+      setPermissionStatus(perm);
+    } catch (e) {
+      console.error("Error loading permissions", e);
+    }
+  };
+
+  useEffect(() => {
+    fetchPermissions();
+  }, [principalSchool]);
+
+  const handleTogglePrincipalUnlock = async () => {
+    setPermissionLoading(true);
+    try {
+      const nextVal = !permissionStatus.principalUnlocked;
+      const res = await togglePrincipalUploadPermission(principalSchool, nextVal);
+      if (res && res.success === false) {
+        if (onError) onError(res.message);
+        return;
+      }
+      onSuccess(
+        language === 'ar'
+          ? `تم ${nextVal ? 'فتح وتفعيل' : 'إغلاق'} صلاحية رفع الملفات لمعلمي المدرسة بنجاح.`
+          : `Teacher upload permission ${nextVal ? 'unlocked' : 'locked'} successfully.`
+      );
+      await fetchPermissions();
+    } catch (err: any) {
+      console.error(err);
+      if (onError) onError(err.message || 'Error updating permission');
+    } finally {
+      setPermissionLoading(false);
+    }
+  };
+
+  const handleApproveTeacherUpload = async (assessmentId: string, title: string) => {
+    try {
+      await approveAssessmentByPrincipal(assessmentId, userProfile);
+      onSuccess(
+        language === 'ar'
+          ? `تمت موافقة مدير المدرسة على إرسال ملف (${title}) إلى مدير النظام بالوزارة بنجاح.`
+          : `File (${title}) approved and forwarded to Ministry Admin successfully.`
+      );
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // Step 4 Queue: Files uploaded by teachers awaiting Principal's approval
+  const pendingPrincipalApprovalFiles = assessments.filter(a => 
+    !a.workflowStage || a.workflowStage === 'teacher_submitted'
+  );
+
     return (
       <div className="space-y-7 animate-in fade-in duration-200">
         
@@ -280,6 +355,107 @@ export function SchoolPrincipalObserver({
             </div>
           </div>
         </div>
+
+        {/* STEP 2b: PRINCIPAL UPLOAD PERMISSION CONTROL BANNER */}
+        <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="w-7 h-7 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-xs">2</span>
+              <h3 className="font-extrabold text-slate-900 text-sm font-heading">
+                {language === 'ar' ? 'الخطوة 2: صلاحية رفع الملفات للمعلمين بالمدرسة' : 'Step 2: Teacher Upload Access Control'}
+              </h3>
+            </div>
+            <p className="text-xs text-slate-500">
+              {language === 'ar'
+                ? `تاريخ الفحص المجدول لمدرستك: ${permissionStatus.inspectionDate || 'اليوم'}. يفتح مدير النظام الصلاحية للمدرسة، ثم يقم مدير المدرسة بتفعيلها للمعلمين.`
+                : `Scheduled inspection date: ${permissionStatus.inspectionDate}. Admin unlocks school access, then Principal unlocks teachers.`}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-3 shrink-0">
+            {!permissionStatus.adminUnlocked ? (
+              <div className="px-3.5 py-2 bg-rose-50 text-rose-700 border border-rose-200 rounded-2xl text-xs font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600" />
+                <span>{language === 'ar' ? 'بانتظار فتح الصلاحية للمدرسة من قِبل مدير النظام' : 'Awaiting Admin Unlock'}</span>
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={permissionLoading}
+                onClick={handleTogglePrincipalUnlock}
+                className={`px-4 py-2.5 rounded-2xl font-black text-xs cursor-pointer transition-all flex items-center gap-2 shadow-sm ${
+                  permissionStatus.principalUnlocked
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                    : 'bg-amber-400 hover:bg-amber-500 text-slate-950'
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>
+                  {permissionStatus.principalUnlocked
+                    ? (language === 'ar' ? 'صلاحية الرفع مفعّلة للمعلمين الآن (انقر للإغلاق)' : 'Upload Unlocked for Teachers')
+                    : (language === 'ar' ? 'تفعيل صلاحية رفع الملفات للمعلمين الآن' : 'Unlock Upload for Teachers Now')}
+                </span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* STEP 4: PRINCIPAL APPROVAL QUEUE BEFORE SENDING TO MINISTRY */}
+        {pendingPrincipalApprovalFiles.length > 0 && (
+          <div className="bg-indigo-50/70 border border-indigo-200 rounded-3xl p-5 shadow-xs space-y-4">
+            <div className="flex items-center justify-between border-b border-indigo-200 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white font-black flex items-center justify-center text-xs">4</span>
+                <h3 className="font-extrabold text-slate-900 text-sm font-heading">
+                  {language === 'ar' ? 'الخطوة 4: ملفات المعلمين بانتظار موافقة مدير المدرسة للإرسال للوزارة' : 'Step 4: Pending Principal Approval Queue'}
+                </h3>
+              </div>
+              <span className="bg-emerald-600 text-white px-2.5 py-0.5 rounded-full text-[10px] font-bold">
+                {pendingPrincipalApprovalFiles.length} {language === 'ar' ? 'ملفات بانتظار الموافقة' : 'files pending'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {pendingPrincipalApprovalFiles.map((file) => (
+                <div key={`approval-${file.id}`} className="bg-white p-4 rounded-2xl border border-indigo-150 shadow-2xs space-y-3 flex flex-col justify-between">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] font-bold px-2 py-0.5 bg-amber-100 text-amber-800 rounded">
+                        {language === 'ar' ? 'مرفوع حديثاً بواسطة المعلم' : 'Teacher Uploaded'}
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-mono">
+                        {new Date(file.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}
+                      </span>
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-xs mt-1.5">{file.title}</h4>
+                    <p className="text-[10.5px] text-slate-500 font-medium">
+                      المعلم: {file.schoolName} • {translateSubject(file.subject, language)} • {file.grade}
+                    </p>
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => onInspect(file)}
+                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
+                    >
+                      فحص المعاينة
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleApproveTeacherUpload(file.id, file.title)}
+                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-2xs"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{language === 'ar' ? 'الموافقة وإرسال للوزارة (مدير النظام)' : 'Approve & Send to Ministry'}</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* HIGH-CONTRAST METRICS STATS */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">

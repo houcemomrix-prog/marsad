@@ -274,125 +274,7 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
   }, [assessments]);
 
 
-  // --- COMPUTE STATISTICS Group 2: Schools Statistics ---
-  // Seed default registered schools to merge with live school data
-  const schoolStats = useMemo(() => {
-    // Compute metrics grouped by school
-    const schoolMetrics: Record<string, { 
-      uploaded: number; 
-      approved: number; 
-      revision: number; 
-      pending: number; 
-      inProgress: number; 
-      name: string;
-      id: string;
-      region: string;
-    }> = {};
-
-    // 1. Initialize with database schools if any exist, fallback to seed list
-    if (dbSchools && dbSchools.length > 0) {
-      dbSchools.forEach(ds => {
-        const displayName = language === 'ar' ? ds.nameAr : ds.nameEn;
-        schoolMetrics[ds.id] = {
-          id: ds.id,
-          name: displayName,
-          region: language === 'ar' ? ds.wilayaAr : ds.wilayaEn,
-          uploaded: 0,
-          approved: 0,
-          revision: 0,
-          pending: 0,
-          inProgress: 0
-        };
-      });
-    } else {
-      // Temporary fallback while db is fetching
-      const defaultSchools = [
-        { id: 'demo-school-1', name: language === 'ar' ? 'مدرسة الدقم للتعليم الأساسي' : 'Duqm Basic Education School', region: language === 'ar' ? 'محافظة الوسطى، الدقم' : 'Al Wusta, Duqm', status: 'Active' },
-        { id: 'seed-school-2', name: language === 'ar' ? 'مدرسة الموالح للتعليم الأساسي' : 'Al-Mawaleh Basic Education', region: language === 'ar' ? 'مسقط، السيب' : 'Muscat, Al Seeb', status: 'Active' },
-        { id: 'seed-school-3', name: language === 'ar' ? 'مدرسة السيب الثانوية' : 'Seeb Secondary School', region: language === 'ar' ? 'مسقط، السيب' : 'Muscat, Seeb Center', status: 'Pending Uploads' },
-        { id: 'seed-school-4', name: language === 'ar' ? 'مدرسة صلالة النموذجية' : 'Salalah Model Academy', region: language === 'ar' ? 'ظفار، صلالة' : 'Dhofar, Salalah', status: 'Active' },
-        { id: 'seed-school-5', name: language === 'ar' ? 'مدرسة صحار الوطنية' : 'Sohar National School', region: language === 'ar' ? 'شمال الباطنة، صحار' : 'Al Batinah North, Sohar', status: 'Active' }
-      ];
-      defaultSchools.forEach(ds => {
-        schoolMetrics[ds.id] = {
-          id: ds.id,
-          name: ds.name,
-          region: ds.region,
-          uploaded: 0,
-          approved: 0,
-          revision: 0,
-          pending: 0,
-          inProgress: 0
-        };
-      });
-    }
-
-    // 2. Populate and merge metrics from actual current assessments state
-    assessments.forEach(a => {
-      // Find matching school in our existing entries
-      let matchedId = '';
-      if (dbSchools && dbSchools.length > 0) {
-        const found = dbSchools.find(ds => 
-          (a.schoolId && ds.id && a.schoolId === ds.id) ||
-          (a.schoolName && ds.nameAr && a.schoolName.trim().toLowerCase() === ds.nameAr.trim().toLowerCase()) ||
-          (a.schoolName && ds.nameEn && a.schoolName.trim().toLowerCase() === ds.nameEn.trim().toLowerCase())
-        );
-        if (found) {
-          matchedId = found.id;
-        }
-      } else {
-        // Simple string comparison for standard fallbacks
-        const key = (a.schoolName || '').trim().toLowerCase();
-        if (key.includes('duqm') || key.includes('دقم') || key.includes('azaiba') || key.includes('عذيبة')) matchedId = 'demo-school-1';
-        else if (key.includes('mawaleh') || key.includes('موالح')) matchedId = 'seed-school-2';
-        else if (key.includes('seeb') || key.includes('سيب')) matchedId = 'seed-school-3';
-        else if (key.includes('salalah') || key.includes('صلالة')) matchedId = 'seed-school-4';
-        else if (key.includes('sohar') || key.includes('صحار')) matchedId = 'seed-school-5';
-      }
-
-      if (matchedId && schoolMetrics[matchedId]) {
-        schoolMetrics[matchedId].uploaded += 1;
-        if (a.status === 'Approved') schoolMetrics[matchedId].approved += 1;
-        else if (a.status === 'Revision Request') schoolMetrics[matchedId].revision += 1;
-        else if (a.status === 'Pending') schoolMetrics[matchedId].pending += 1;
-        else if (a.status === 'In Progress') schoolMetrics[matchedId].inProgress += 1;
-      } else {
-        // Dynamic or standalone school not in seed/db lists
-        const schoolName = a.schoolName || 'Unknown School';
-        const dynamicId = a.schoolId || `dyn-${schoolName}`;
-        if (!schoolMetrics[dynamicId]) {
-          schoolMetrics[dynamicId] = {
-            id: dynamicId,
-            name: schoolName,
-            region: language === 'ar' ? 'سلطنة عمان' : 'Oman Region',
-            uploaded: 0,
-            approved: 0,
-            revision: 0,
-            pending: 0,
-            inProgress: 0
-          };
-        }
-        schoolMetrics[dynamicId].uploaded += 1;
-        if (a.status === 'Approved') schoolMetrics[dynamicId].approved += 1;
-        else if (a.status === 'Revision Request') schoolMetrics[dynamicId].revision += 1;
-        else if (a.status === 'Pending') schoolMetrics[dynamicId].pending += 1;
-        else if (a.status === 'In Progress') schoolMetrics[dynamicId].inProgress += 1;
-      }
-    });
-
-    return Object.values(schoolMetrics);
-  }, [assessments, dbSchools, language]);
-
-  // Filtered Schools derived from local search input query
-  const filteredSchools = useMemo(() => {
-    return schoolStats.filter(s => 
-      s.name.toLowerCase().includes(schoolSearchQuery.toLowerCase()) ||
-      s.region.toLowerCase().includes(schoolSearchQuery.toLowerCase())
-    );
-  }, [schoolStats, schoolSearchQuery]);
-
-
-  // --- COMPUTE STATISTICS Group 4: Compliance & Alignment Statistics ---
+  // --- COMPUTE STATISTICS Group 4 & Group 1: Compliance & Alignment Statistics ---
   const complianceStats = useMemo(() => {
     const schoolsList: { id: string; nameAr: string; nameEn: string; wilayaId: string; wilayaAr: string; wilayaEn: string }[] = [];
     
@@ -430,16 +312,22 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
       wilayaId: string;
       wilayaAr: string;
       wilayaEn: string;
+      totalForms: number;
+      totalSamples: number;
       aligned: number;
       nonAligned: number;
       gradeRevision: number;
     }> = {};
 
     schoolsList.forEach(s => {
-      // Seed some deterministic metrics so the UI isn't starting blank
+      // Seed deterministic metrics per school
       const baseAligned = Math.abs((s.nameAr.length * 3) % 9) + 5;
-      const baseNonAligned = Math.abs((s.nameAr.length + 2) % 4) + 1;
-      const baseGradeRev = Math.abs((s.nameAr.length * 5) % 3) + 1;
+      const baseGradeRev = Math.abs((s.nameAr.length * 5) % 3) + 1; // Grade 12 only
+      const baseOtherIssues = Math.abs((s.nameAr.length + 2) % 4) + 1;
+      // Per official rules: forms with grade revisions are a subset of non-conforming forms
+      const baseNonAligned = baseOtherIssues + baseGradeRev;
+      const baseTotalForms = baseAligned + baseNonAligned;
+      const baseTotalSamples = baseTotalForms * 6; // 6 student samples per audit form
 
       rawStats[s.id] = {
         schoolId: s.id,
@@ -448,6 +336,8 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
         wilayaId: s.wilayaId,
         wilayaAr: s.wilayaAr,
         wilayaEn: s.wilayaEn,
+        totalForms: baseTotalForms,
+        totalSamples: baseTotalSamples,
         aligned: baseAligned,
         nonAligned: baseNonAligned,
         gradeRevision: baseGradeRev
@@ -469,12 +359,17 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
       }
 
       if (matchId && rawStats[matchId]) {
+        rawStats[matchId].totalForms += 1;
+        rawStats[matchId].totalSamples += 6; // 6 student samples per form
+
+        const isG12 = a.grade === 'Grade 12' || a.grade?.includes('12') || a.grade?.includes('الثاني عشر');
+
         if (a.status === 'Approved') {
           rawStats[matchId].aligned += 1;
-        } else if (a.status === 'Revision Request') {
-          rawStats[matchId].nonAligned += 1;
-        } else if (a.status === 'Grade Revision') {
+        } else if (a.status === 'Grade Revision' && isG12) {
+          // Grade revision in Grade 12 final exam is a subset of non-conforming forms
           rawStats[matchId].gradeRevision += 1;
+          rawStats[matchId].nonAligned += 1;
         } else {
           rawStats[matchId].nonAligned += 1;
         }
@@ -483,6 +378,39 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
 
     return Object.values(rawStats);
   }, [assessments, dbSchools]);
+
+  // --- COMPUTE STATISTICS Group 1: Schools Statistics ---
+  const schoolStats = useMemo(() => {
+    return complianceStats.map(s => {
+      const name = language === 'ar' ? s.schoolNameAr : s.schoolNameEn;
+      const region = language === 'ar' ? s.wilayaAr : s.wilayaEn;
+      const rate = s.totalForms > 0 ? Math.round((s.aligned / s.totalForms) * 100) : 0;
+      return {
+        id: s.schoolId,
+        name,
+        region,
+        totalForms: s.totalForms,
+        totalSamples: s.totalSamples,
+        aligned: s.aligned,
+        nonAligned: s.nonAligned,
+        gradeRevision: s.gradeRevision,
+        complianceRate: rate,
+        uploaded: s.totalForms,
+        approved: s.aligned,
+        revision: s.nonAligned,
+        pending: 0,
+        inProgress: 0
+      };
+    });
+  }, [complianceStats, language]);
+
+  // Filtered Schools derived from local search input query
+  const filteredSchools = useMemo(() => {
+    return schoolStats.filter(s => 
+      s.name.toLowerCase().includes(schoolSearchQuery.toLowerCase()) ||
+      s.region.toLowerCase().includes(schoolSearchQuery.toLowerCase())
+    );
+  }, [schoolStats, schoolSearchQuery]);
 
   const filteredComplianceData = useMemo(() => {
     let list = complianceStats;
@@ -496,18 +424,21 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
   }, [complianceStats, complianceWilayatFilter, complianceSchoolFilter]);
 
   const complianceTotals = useMemo(() => {
+    let totalForms = 0;
+    let totalSamples = 0;
     let aligned = 0;
     let nonAligned = 0;
     let gradeRevision = 0;
 
     filteredComplianceData.forEach(item => {
+      totalForms += item.totalForms;
+      totalSamples += item.totalSamples;
       aligned += item.aligned;
       nonAligned += item.nonAligned;
       gradeRevision += item.gradeRevision;
     });
 
-    const total = aligned + nonAligned + gradeRevision;
-    return { aligned, nonAligned, gradeRevision, total };
+    return { totalForms, totalSamples, aligned, nonAligned, gradeRevision, total: totalForms };
   }, [filteredComplianceData]);
 
   const complianceSchoolsDropdown = useMemo(() => {
@@ -527,22 +458,28 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
 
     return wilayats.map(w => {
       const schoolsInW = complianceStats.filter(item => item.wilayaId === w.id);
+      let totalForms = 0;
+      let totalSamples = 0;
       let aligned = 0;
       let nonAligned = 0;
       let gradeRevision = 0;
 
       schoolsInW.forEach(s => {
+        totalForms += s.totalForms;
+        totalSamples += s.totalSamples;
         aligned += s.aligned;
         nonAligned += s.nonAligned;
         gradeRevision += s.gradeRevision;
       });
 
-      const total = aligned + nonAligned + gradeRevision;
+      const total = totalForms;
 
       return {
         wilayaId: w.id,
         nameAr: w.nameAr,
         nameEn: w.nameEn,
+        totalForms,
+        totalSamples,
         aligned,
         nonAligned,
         gradeRevision,
@@ -1099,21 +1036,22 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
               <div className="overflow-x-auto">
                 <table className={`w-full ${language === 'ar' ? 'text-right' : 'text-left'} border-collapse text-xs font-sans`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
                   <thead>
-                    <tr className="bg-slate-50 border-b border-slate-150 text-[10.5px] font-extrabold uppercase tracking-wider text-slate-400">
-                      <th className={`py-3 px-4 text-slate-550 ${language === 'ar' ? 'text-right' : 'text-left'}`}>{language === 'ar' ? 'المدرسة / المؤسسة التعليمية' : 'School Institution'}</th>
-                      <th className="py-3 px-3 text-center text-slate-550">{language === 'ar' ? 'إجمالي المرفوعات' : 'Total Uploads'}</th>
-                      <th className="py-3 px-2 text-center text-emerald-600 font-bold">{language === 'ar' ? 'المعتمدة' : 'Approved'}</th>
-                      <th className="py-3 px-2 text-center text-rose-550 font-bold">{language === 'ar' ? 'طلبات تعديل' : 'Revisions'}</th>
-                      <th className="py-3 px-2 text-center text-amber-600 font-bold">{language === 'ar' ? 'قيد الانتظار' : 'Pending'}</th>
-                      <th className={`py-3 px-4 text-slate-550 ${language === 'ar' ? 'text-left' : 'text-right'}`}>{language === 'ar' ? 'معدل الاعتماد والقبول' : 'Approval Rate'}</th>
+                    <tr className="bg-slate-50 border-b border-slate-150 text-[10.5px] font-extrabold uppercase tracking-wider text-slate-500 font-sans">
+                      <th className={`py-3 px-4 text-slate-600 ${language === 'ar' ? 'text-right' : 'text-left'}`}>{language === 'ar' ? 'المدرسة / المؤسسة التعليمية' : 'School Institution'}</th>
+                      <th className="py-3 px-3 text-center text-slate-800 font-black">{language === 'ar' ? 'عدد الاستمارات الجملية' : 'Total Forms'}</th>
+                      <th className="py-3 px-3 text-center text-blue-700 font-black bg-blue-50/20">{language === 'ar' ? 'عدد العينات للفحص (6 لكل استمارة)' : 'Samples (6/form)'}</th>
+                      <th className="py-3 px-2 text-center text-emerald-700 font-bold bg-emerald-50/20">{language === 'ar' ? 'استمارات مطابقة' : 'Conforming'}</th>
+                      <th className="py-3 px-2 text-center text-rose-700 font-bold bg-rose-50/20">{language === 'ar' ? 'استمارات غير مطابقة' : 'Non-Conforming'}</th>
+                      <th className="py-3 px-2 text-center text-indigo-800 font-bold bg-indigo-50/30">
+                        <span className="block leading-tight">{language === 'ar' ? 'منها: تعديل درجات ⚖️' : 'Grade Rev.'}</span>
+                        <span className="text-[8.5px] font-medium text-indigo-600 block">({language === 'ar' ? 'فحص نهائي صف 12 فقط' : 'G12 Final only'})</span>
+                      </th>
+                      <th className={`py-3 px-4 text-slate-600 ${language === 'ar' ? 'text-left' : 'text-right'}`}>{language === 'ar' ? 'معدل المطابقة والاعتماد' : 'Compliance Rate'}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredSchools.map((school, index) => {
-                      // Calculate approval rate
-                      const appRate = school.uploaded > 0
-                        ? Math.round((school.approved / school.uploaded) * 100)
-                        : 0;
+                      const appRate = school.complianceRate;
 
                       // Decide a visual safety class
                       let labelColor = 'text-slate-650';
@@ -1124,7 +1062,7 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                       } else if (appRate >= 40) {
                         labelColor = 'text-[#D4AF37] font-bold';
                         barColor = 'bg-amber-400';
-                      } else if (school.uploaded > 0) {
+                      } else if (school.totalForms > 0) {
                         labelColor = 'text-rose-600 font-bold';
                         barColor = 'bg-rose-500';
                       }
@@ -1145,21 +1083,26 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                               <p className="text-[10px] text-slate-400 font-sans truncate mt-0.5">{school.region}</p>
                             </div>
                           </td>
-                          <td className="py-3 px-3 text-center font-bold text-slate-700">
-                            {school.uploaded}
+                          <td className="py-3 px-3 text-center font-black text-slate-800">
+                            {school.totalForms}
                           </td>
-                          <td className="py-3 px-2 text-center font-mono text-emerald-600 font-bold">
-                            {school.approved}
+                          <td className="py-3 px-3 text-center font-bold text-blue-800 bg-blue-50/15">
+                            {school.totalSamples}
                           </td>
-                          <td className="py-3 px-2 text-center font-mono text-rose-500 font-medium">
-                            {school.revision}
+                          <td className="py-3 px-2 text-center font-mono text-emerald-600 font-bold bg-emerald-50/10">
+                            {school.aligned}
                           </td>
-                          <td className="py-3 px-2 text-center font-mono text-amber-550 font-medium">
-                            {school.pending + school.inProgress}
+                          <td className="py-3 px-2 text-center font-mono text-rose-600 font-bold bg-rose-50/10">
+                            {school.nonAligned}
+                          </td>
+                          <td className="py-3 px-2 text-center font-mono text-indigo-700 font-bold bg-indigo-50/10">
+                            <span className="inline-flex items-center gap-1 bg-indigo-100/70 text-indigo-900 px-2 py-0.5 rounded font-black text-[11px]" title={language === 'ar' ? 'جزء من الاستمارات غير المطابقة (فحص نهائي صف 12 فقط)' : 'Subset of non-conforming (Grade 12 final only)'}>
+                              {school.gradeRevision}
+                            </span>
                           </td>
                           <td className={`py-3 px-4 ${language === 'ar' ? 'text-left' : 'text-right'}`}>
                             <div className={`flex flex-col ${language === 'ar' ? 'items-start' : 'items-end'} gap-1 font-sans`}>
-                              {school.uploaded > 0 ? (
+                              {school.totalForms > 0 ? (
                                 <>
                                   <span className={`text-[11px] font-bold ${labelColor}`}>
                                     {appRate}%
@@ -1170,7 +1113,7 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                                   </div>
                                 </>
                               ) : (
-                                <span className="text-[9.5px] text-slate-400 italic">{language === 'ar' ? 'لا توجد أوراق بعد' : 'No papers'}</span>
+                                <span className="text-[9.5px] text-slate-400 italic">{language === 'ar' ? 'لا توجد استمارات بعد' : 'No forms'}</span>
                               )}
                             </div>
                           </td>
@@ -1184,23 +1127,47 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
           </div>
 
           {/* School detail sub-card showing when clicking a school row */}
-          {selectedInspectSchool && (
-            <div className="bg-slate-50 border border-slate-150 p-4.5 rounded-2xl space-y-2 animate-in slide-in-from-bottom-2 duration-150 text-xs text-right">
-              <div className="flex items-center justify-between border-b border-slate-205 pb-1.5">
-                <span className="font-extrabold text-slate-800 font-heading tracking-wide uppercase text-[10px]">
-                  {language === 'ar' ? 'تفاصيل المراجعة والتدقيق للمدرسة: ' : 'Institutional Detail Review: '} {selectedInspectSchool}
-                </span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold border border-emerald-100">
-                  {language === 'ar' ? 'مطابقات المنهج الوطني بوزارة التعليم' : 'Oman National Syllabus Matches'}
-                </span>
+          {selectedInspectSchool && (() => {
+            const sc = schoolStats.find(s => s.name === selectedInspectSchool);
+            return (
+              <div className="bg-slate-50 border border-slate-150 p-4.5 rounded-2xl space-y-3 animate-in slide-in-from-bottom-2 duration-150 text-xs text-right">
+                <div className="flex items-center justify-between border-b border-slate-205 pb-2">
+                  <span className="font-extrabold text-slate-800 font-heading tracking-wide uppercase text-[10.5px]">
+                    {language === 'ar' ? 'تفاصيل إحصاءات التدقيق للمدرسة: ' : 'Auditing Statistics Detail: '} {selectedInspectSchool}
+                  </span>
+                  <span className="text-[9px] px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 font-bold border border-emerald-100">
+                    {language === 'ar' ? `نسبة المطابقة: ${sc?.complianceRate || 0}%` : `Compliance: ${sc?.complianceRate || 0}%`}
+                  </span>
+                </div>
+                
+                {/* 5 Cards breakdown for inspected school */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center py-1">
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200 shadow-2xs">
+                    <span className="text-[9.5px] text-slate-400 font-bold block">{language === 'ar' ? 'عدد الاستمارات الجملية' : 'Total Forms'}</span>
+                    <span className="text-base font-black text-slate-800">{sc?.totalForms || 0}</span>
+                  </div>
+                  <div className="bg-blue-50/60 p-2.5 rounded-xl border border-blue-100 shadow-2xs">
+                    <span className="text-[9.5px] text-blue-700 font-bold block">{language === 'ar' ? 'عدد العينات للفحص' : 'Audited Samples'}</span>
+                    <span className="text-base font-black text-blue-900">{sc?.totalSamples || 0}</span>
+                    <span className="text-[8px] text-blue-500 block leading-tight mt-0.5">{language === 'ar' ? '6 عينات / استمارة' : '6 samples/form'}</span>
+                  </div>
+                  <div className="bg-emerald-50/60 p-2.5 rounded-xl border border-emerald-100 shadow-2xs">
+                    <span className="text-[9.5px] text-emerald-700 font-bold block">{language === 'ar' ? 'استمارات مطابقة' : 'Conforming'}</span>
+                    <span className="text-base font-black text-emerald-900">{sc?.aligned || 0}</span>
+                  </div>
+                  <div className="bg-rose-50/60 p-2.5 rounded-xl border border-rose-100 shadow-2xs">
+                    <span className="text-[9.5px] text-rose-700 font-bold block">{language === 'ar' ? 'استمارات غير مطابقة' : 'Non-Conforming'}</span>
+                    <span className="text-base font-black text-rose-900">{sc?.nonAligned || 0}</span>
+                  </div>
+                  <div className="bg-indigo-50/60 p-2.5 rounded-xl border border-indigo-100 shadow-2xs">
+                    <span className="text-[9.5px] text-indigo-700 font-bold block">{language === 'ar' ? 'تعديل درجات (صف 12)' : 'Grade Alterations'}</span>
+                    <span className="text-base font-black text-indigo-900">{sc?.gradeRevision || 0}</span>
+                    <span className="text-[8px] text-indigo-600 block leading-tight mt-0.5">{language === 'ar' ? '⚖️ جزء من غير المطابقة' : '⚖️ subset'}</span>
+                  </div>
+                </div>
               </div>
-              <p className="text-slate-500 leading-relaxed text-[11px]">
-                {language === 'ar' 
-                  ? `قامت مدرسة (${selectedInspectSchool}) برفع وتأكيد حزم ملفات المنهج. تخضع جميع المرفوعات للفحص العكسي ضد البنية المرجعية العمانية لتجنب تفاوت وتعارض الأهداف قبل إرسالها للتقييم النهائي.`
-                  : `This institution has loaded ${schoolStats.find(s => s.name === selectedInspectSchool)?.uploaded || 0} total curriculum packets. All papers are automatically mapped under the Oman Unified Portal system to detect any outline deviations before being issued to pedagogical units.`}
-              </p>
-            </div>
-          )}
+            );
+          })()}
         </div>
 
         {/* ==========================================
@@ -1783,85 +1750,103 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
 
             </div>
 
-            {/* General metrics numerical summaries */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {/* General metrics numerical summaries: 5 Key Metrics Requested */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
               
-              {/* Box 1: Aligned */}
-              <div className="p-4 bg-emerald-50/40 border border-emerald-100 rounded-2xl flex flex-col justify-between space-y-1">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[9.5px] font-black uppercase text-emerald-800 tracking-wider font-sans">
-                      {language === 'ar' ? 'كراسات مطابقة ✓' : 'Aligned ✓'}
-                    </span>
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
-                  </div>
-                  <h4 className="text-xl font-bold text-emerald-900 mt-1 font-sans">
-                    {complianceTotals.aligned} <span className="text-[10px] text-slate-400 font-medium font-sans">{language === 'ar' ? 'كراسة' : 'claims'}</span>
-                  </h4>
-                </div>
-                <p className="text-[10px] text-emerald-700 italic font-medium font-sans mt-1.5">
-                  {complianceTotals.total > 0 ? Math.round(complianceTotals.aligned / complianceTotals.total * 100) : 0}% {language === 'ar' ? 'من الإجمالي المقيّم' : 'of compliance total'}
-                </p>
-              </div>
-
-              {/* Box 2: Non Aligned */}
-              <div className="p-4 bg-rose-50/40 border border-rose-100 rounded-2xl flex flex-col justify-between space-y-1">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[9.5px] font-black uppercase text-rose-800 tracking-wider font-sans">
-                      {language === 'ar' ? 'غير مطابق ⚠️' : 'Non-aligned ⚠️'}
-                    </span>
-                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block animate-pulse"></span>
-                  </div>
-                  <h4 className="text-xl font-bold text-rose-900 mt-1 font-sans">
-                    {complianceTotals.nonAligned} <span className="text-[10px] text-slate-400 font-medium font-sans">{language === 'ar' ? 'كراسة' : 'claims'}</span>
-                  </h4>
-                </div>
-                <p className="text-[10px] text-rose-700 italic font-medium font-sans mt-1.5">
-                  {complianceTotals.total > 0 ? Math.round(complianceTotals.nonAligned / complianceTotals.total * 100) : 0}% {language === 'ar' ? 'استدعى مراجعة وإعادة صياغة' : 'requires validation'}
-                </p>
-              </div>
-
-              {/* Box 3: Grade adjustment */}
-              <div className="p-4 bg-indigo-50/40 border border-indigo-100 rounded-2xl flex flex-col justify-between space-y-1 font-sans">
-                <div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-[9.5px] font-black uppercase text-indigo-805 tracking-wider font-sans">
-                      {language === 'ar' ? 'تعديل درجات ⚖️' : 'Grade Adjustment ⚖️'}
-                    </span>
-                    <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block"></span>
-                  </div>
-                  <h4 className="text-xl font-bold text-indigo-900 mt-1 font-sans">
-                    {complianceTotals.gradeRevision} <span className="text-[10px] text-slate-400 font-medium font-sans">{language === 'ar' ? 'كراسة' : 'claims'}</span>
-                  </h4>
-                </div>
-                <p className="text-[10px] text-indigo-700 italic font-medium font-sans mt-1.5">
-                  {complianceTotals.total > 0 ? Math.round(complianceTotals.gradeRevision / complianceTotals.total * 100) : 0}% {language === 'ar' ? 'معالجة وتصحيح للأوزان النسبية' : 'weight shifts requested'}
-                </p>
-              </div>
-
-              {/* Box 4: Total evaluated */}
-              <div className="p-4 bg-slate-50 border border-slate-150 rounded-2xl flex flex-col justify-between space-y-1">
+              {/* Box 1: Total Forms */}
+              <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col justify-between space-y-1.5 shadow-2xs">
                 <div>
                   <div className="flex items-center justify-between font-sans">
-                    <span className="text-[9.5px] font-black uppercase text-slate-500 tracking-wider">
-                      {language === 'ar' ? 'الأوراق المقيّمة' : 'Evaluated Papers'}
+                    <span className="text-[10px] font-black uppercase text-slate-600 tracking-wider">
+                      {language === 'ar' ? 'عدد الاستمارات الجملية' : 'Total Forms'}
                     </span>
-                    <span className="text-[10px] font-bold text-slate-400 font-sans">Total</span>
+                    <FileText className="w-4 h-4 text-slate-500" />
                   </div>
-                  <h4 className="text-xl font-bold text-slate-900 mt-1 font-sans">
-                    {complianceTotals.total} <span className="text-[10px] text-slate-400 font-medium font-sans">{language === 'ar' ? 'وثيقة كلياً' : 'total items'}</span>
+                  <h4 className="text-2xl font-black text-slate-900 mt-1 font-sans">
+                    {complianceTotals.totalForms} <span className="text-[10.5px] text-slate-400 font-bold font-sans">{language === 'ar' ? 'استمارة' : 'forms'}</span>
                   </h4>
                 </div>
-                <p className="text-[10px] text-slate-500 italic font-medium font-sans mt-1.5">
-                  {language === 'ar' ? 'بالمقارنة مع المرجع الوزاري' : 'Cross-validated against reference guides'}
+                <p className="text-[10px] text-slate-500 font-medium font-sans">
+                  {language === 'ar' ? 'إجمالي الاستمارات المسجلة للمدارس' : 'Overall institutional forms'}
                 </p>
+              </div>
+
+              {/* Box 2: Total Student Samples */}
+              <div className="p-4 bg-blue-50/50 border border-blue-100 rounded-2xl flex flex-col justify-between space-y-1.5 shadow-2xs">
+                <div>
+                  <div className="flex items-center justify-between font-sans">
+                    <span className="text-[10px] font-black uppercase text-blue-800 tracking-wider">
+                      {language === 'ar' ? 'عدد العينات للفحص' : 'Audited Samples'}
+                    </span>
+                    <Users className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <h4 className="text-2xl font-black text-blue-900 mt-1 font-sans">
+                    {complianceTotals.totalSamples} <span className="text-[10.5px] text-blue-400 font-bold font-sans">{language === 'ar' ? 'عينة طالب' : 'samples'}</span>
+                  </h4>
+                </div>
+                <p className="text-[10px] text-blue-700 font-medium font-sans">
+                  {language === 'ar' ? 'بواقع 6 عينات طلاب لكل استمارة' : '6 student samples per form'}
+                </p>
+              </div>
+
+              {/* Box 3: Aligned (Conforming) */}
+              <div className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-2xl flex flex-col justify-between space-y-1.5 shadow-2xs">
+                <div>
+                  <div className="flex items-center justify-between font-sans">
+                    <span className="text-[10px] font-black uppercase text-emerald-800 tracking-wider">
+                      {language === 'ar' ? 'الاستمارات المطابقة' : 'Conforming Forms'}
+                    </span>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <h4 className="text-2xl font-black text-emerald-900 mt-1 font-sans">
+                    {complianceTotals.aligned} <span className="text-[10.5px] text-emerald-500 font-bold font-sans">{language === 'ar' ? 'استمارة' : 'forms'}</span>
+                  </h4>
+                </div>
+                <p className="text-[10px] text-emerald-700 font-bold font-sans">
+                  {complianceTotals.totalForms > 0 ? Math.round(complianceTotals.aligned / complianceTotals.totalForms * 100) : 0}% {language === 'ar' ? 'مستوفية للمواصفات الفنية' : 'conformance rate'}
+                </p>
+              </div>
+
+              {/* Box 4: Non-Aligned (Non-conforming) */}
+              <div className="p-4 bg-rose-50/60 border border-rose-200/80 rounded-2xl flex flex-col justify-between space-y-1.5 shadow-2xs">
+                <div>
+                  <div className="flex items-center justify-between font-sans">
+                    <span className="text-[10px] font-black uppercase text-rose-800 tracking-wider">
+                      {language === 'ar' ? 'الاستمارات غير المطابقة' : 'Non-Conforming'}
+                    </span>
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+                  </div>
+                  <h4 className="text-2xl font-black text-rose-900 mt-1 font-sans">
+                    {complianceTotals.nonAligned} <span className="text-[10.5px] text-rose-400 font-bold font-sans">{language === 'ar' ? 'استمارة' : 'forms'}</span>
+                  </h4>
+                </div>
+                <p className="text-[10px] text-rose-700 font-bold font-sans">
+                  {language === 'ar' ? `تشمل ${complianceTotals.gradeRevision} استمارة بتعديل درجات` : `Includes ${complianceTotals.gradeRevision} grade revisions`}
+                </p>
+              </div>
+
+              {/* Box 5: Grade Revisions (Grade 12 Only - Subset of Non-conforming) */}
+              <div className="p-4 bg-indigo-50/60 border border-indigo-200/80 rounded-2xl flex flex-col justify-between space-y-1.5 shadow-2xs">
+                <div>
+                  <div className="flex items-center justify-between font-sans">
+                    <span className="text-[10px] font-black uppercase text-indigo-900 tracking-wider">
+                      {language === 'ar' ? 'تعديل درجات (صف 12)' : 'Grade Alterations'}
+                    </span>
+                    <Percent className="w-4 h-4 text-indigo-600" />
+                  </div>
+                  <h4 className="text-2xl font-black text-indigo-900 mt-1 font-sans">
+                    {complianceTotals.gradeRevision} <span className="text-[10.5px] text-indigo-400 font-bold font-sans">{language === 'ar' ? 'استمارة' : 'forms'}</span>
+                  </h4>
+                </div>
+                <div className="bg-indigo-100/80 text-indigo-900 px-2 py-0.5 rounded text-[9.5px] font-extrabold leading-tight">
+                  {language === 'ar' ? '⚖️ جزء من الاستمارات غير المطابقة (فحص نهائي صف 12 فقط)' : '⚖️ Subset of non-conforming (Grade 12 only)'}
+                </div>
               </div>
 
             </div>
 
             {/* RENDER CHOSEN DISPLAY FORMAT MODE */}
-            {complianceTotals.total === 0 ? (
+            {complianceTotals.totalForms === 0 ? (
               <div className="text-center py-10 border border-dashed border-slate-200 rounded-2xl text-slate-400 bg-slate-50/50 text-xs font-sans">
                 ⚠️ {language === 'ar' ? 'لم يتم تسجيل بيانات أو إحصاءات تطابق من المدارس المحددة حالياً.' : 'No compliance data matching the filtered settings is recorded.'}
               </div>
@@ -1871,19 +1856,23 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                 <div className="overflow-x-auto">
                   <table className={`w-full ${language === 'ar' ? 'text-right' : 'text-left'} border-collapse`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
                     <thead>
-                      <tr className="bg-slate-50/75 border-b border-slate-150 text-[10.5px] font-extrabold uppercase tracking-wider text-slate-400 font-sans">
-                        <th className="py-2.5 px-4 text-slate-600">{language === 'ar' ? 'المدرسة / المؤسسة التعليمية' : 'Educational School'}</th>
-                        <th className="py-2.5 px-3 text-slate-600 text-center">{language === 'ar' ? 'الولاية' : 'Wilayat'}</th>
-                        <th className="py-2.5 px-3 text-center text-emerald-700 font-bold bg-emerald-50/30">{language === 'ar' ? 'مطابق ✓' : 'Aligned'}</th>
-                        <th className="py-2.5 px-3 text-center text-rose-700 font-bold bg-rose-50/30">{language === 'ar' ? 'غير مطابق ⚠️' : 'Non-Compliant'}</th>
-                        <th className="py-2.5 px-3 text-center text-indigo-700 font-bold bg-indigo-50/30">{language === 'ar' ? 'تعديل درجات ⚖️' : 'Grade Rev.'}</th>
-                        <th className="py-2.5 px-3 text-center font-bold text-slate-800">{language === 'ar' ? 'إجمالي الأوراق المقيّمة' : 'Total Items'}</th>
-                        <th className="py-2.5 px-4 text-center text-slate-600">{language === 'ar' ? 'نسبة الالتزام' : 'Compliance Rate'}</th>
+                      <tr className="bg-slate-50/80 border-b border-slate-200 text-[10.5px] font-black uppercase tracking-wider text-slate-600 font-sans">
+                        <th className="py-3 px-4 text-start">{language === 'ar' ? 'المدرسة / المؤسسة التعليمية' : 'School'}</th>
+                        <th className="py-3 px-3 text-center">{language === 'ar' ? 'الولاية' : 'Wilayat'}</th>
+                        <th className="py-3 px-3 text-center font-black text-slate-800 bg-slate-100/40">{language === 'ar' ? 'عدد الاستمارات الجملية' : 'Total Forms'}</th>
+                        <th className="py-3 px-3 text-center text-blue-700 font-black bg-blue-50/30">{language === 'ar' ? 'عدد العينات للفحص (6 لكل استمارة)' : 'Samples (6/form)'}</th>
+                        <th className="py-3 px-3 text-center text-emerald-700 font-black bg-emerald-50/40">{language === 'ar' ? 'استمارات مطابقة ✓' : 'Conforming'}</th>
+                        <th className="py-3 px-3 text-center text-rose-700 font-black bg-rose-50/40">{language === 'ar' ? 'استمارات غير مطابقة ⚠️' : 'Non-Conforming'}</th>
+                        <th className="py-3 px-3 text-center text-indigo-800 font-black bg-indigo-50/50">
+                          <span className="block leading-tight">{language === 'ar' ? 'منها: تعديل درجات ⚖️' : 'Grade Rev.'}</span>
+                          <span className="text-[8.5px] font-bold text-indigo-600 block">(صف 12 فقط)</span>
+                        </th>
+                        <th className="py-3 px-4 text-center">{language === 'ar' ? 'نسبة المطابقة' : 'Rate'}</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-sans font-medium">
                       {filteredComplianceData.map((item, index) => {
-                        const totalItem = item.aligned + item.nonAligned + item.gradeRevision;
+                        const totalItem = item.totalForms;
                         const rate = totalItem > 0 ? Math.round((item.aligned / totalItem) * 100) : 0;
                         let rateLabelColor = 'text-slate-650';
                         let rateBarColor = 'bg-slate-300';
@@ -1900,25 +1889,30 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
 
                         return (
                           <tr key={`comp-tab-${item.schoolId}-${index}`} className="hover:bg-slate-50/50 transition-colors">
-                            <td className="py-2.5 px-4 font-bold text-slate-800">
+                            <td className="py-3 px-4 font-bold text-slate-800 text-start">
                               {language === 'ar' ? item.schoolNameAr : item.schoolNameEn}
                             </td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-550 text-center">
+                            <td className="py-3 px-3 font-semibold text-slate-550 text-center">
                               {language === 'ar' ? item.wilayaAr : item.wilayaEn}
                             </td>
-                            <td className="py-2.5 px-3 text-center text-emerald-805 font-extrabold bg-emerald-50/10">
+                            <td className="py-3 px-3 text-center font-black text-slate-900 bg-slate-100/20">
+                              {item.totalForms}
+                            </td>
+                            <td className="py-3 px-3 text-center font-black text-blue-900 bg-blue-50/15">
+                              {item.totalSamples}
+                            </td>
+                            <td className="py-3 px-3 text-center text-emerald-805 font-extrabold bg-emerald-50/10">
                               {item.aligned}
                             </td>
-                            <td className="py-2.5 px-3 text-center text-rose-805 font-extrabold bg-rose-50/10">
+                            <td className="py-3 px-3 text-center text-rose-805 font-extrabold bg-rose-50/10">
                               {item.nonAligned}
                             </td>
-                            <td className="py-2.5 px-3 text-center text-indigo-805 font-extrabold bg-indigo-50/10">
-                              {item.gradeRevision}
+                            <td className="py-3 px-3 text-center text-indigo-805 font-extrabold bg-indigo-50/10">
+                              <span className="inline-flex items-center gap-1 bg-indigo-100/70 text-indigo-900 px-2 py-0.5 rounded font-black text-[11px]" title="جزء من الاستمارات غير المطابقة - فحص نهائي دبلوم التعليم العام">
+                                {item.gradeRevision}
+                              </span>
                             </td>
-                            <td className="py-2.5 px-3 text-center font-black text-[#051C3F] bg-slate-100/20">
-                              {totalItem}
-                            </td>
-                            <td className="py-2.5 px-4">
+                            <td className="py-3 px-4">
                               <div className="flex flex-col items-center gap-1 font-sans">
                                 <span className={`text-[10px] ${rateLabelColor}`}>{rate}%</span>
                                 <div className="w-16 h-1 w-full bg-slate-100 rounded-full overflow-hidden block">
@@ -1937,38 +1931,41 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
               /* ================= RENDER BAR CHART VIEW ================= */
               <div className="bg-slate-50 p-6 rounded-2xl border border-slate-150 flex flex-col space-y-6 animate-in fade-in duration-200 text-xs font-sans">
                 <div className="text-center font-bold text-slate-700 text-xs">
-                  {language === 'ar' ? '📊 مقارنة توزيع كراسات المواءمة الكلية' : '📊 Comparative Column Distribution of Overall Compliance Elements'}
+                  {language === 'ar' ? '📊 مقارنة توزيع استمارات المطابقة والتعديل' : '📊 Comparative Distribution of Compliance & Adjustment Forms'}
                 </div>
 
                 <div className="flex flex-col md:flex-row items-stretch justify-around gap-8 md:h-64 py-4">
                   {/* Column 1: Aligned */}
                   <div className="flex-1 flex flex-col items-center justify-end space-y-2">
-                    <span className="font-extrabold text-emerald-700 text-xs">{complianceTotals.aligned} كراسات ({complianceTotals.total > 0 ? Math.round(complianceTotals.aligned / complianceTotals.total * 100) : 0}%)</span>
+                    <span className="font-extrabold text-emerald-700 text-xs">{complianceTotals.aligned} {language === 'ar' ? 'استمارة' : 'forms'} ({complianceTotals.totalForms > 0 ? Math.round(complianceTotals.aligned / complianceTotals.totalForms * 100) : 0}%)</span>
                     <div className="w-20 md:w-24 bg-gradient-to-t from-emerald-600 to-emerald-400 rounded-t-xl transition-all duration-350 relative group flex items-end justify-center shadow-md shadow-emerald-100/30" 
-                         style={{ height: `${complianceTotals.total > 0 ? (complianceTotals.aligned / complianceTotals.total) * 100 : 0}%`, minHeight: '12px' }}>
-                      <span className="absolute -bottom-6 text-[9.5px] font-bold text-emerald-805">{language === 'ar' ? 'مطابق' : 'Aligned'}</span>
+                         style={{ height: `${complianceTotals.totalForms > 0 ? (complianceTotals.aligned / complianceTotals.totalForms) * 100 : 0}%`, minHeight: '12px' }}>
+                      <span className="absolute -bottom-6 text-[9.5px] font-bold text-emerald-805 whitespace-nowrap">{language === 'ar' ? 'استمارات مطابقة' : 'Conforming'}</span>
                     </div>
                   </div>
 
                   {/* Column 2: Non Aligned */}
                   <div className="flex-1 flex flex-col items-center justify-end space-y-2">
-                    <span className="font-extrabold text-rose-700 text-xs">{complianceTotals.nonAligned} كراسات ({complianceTotals.total > 0 ? Math.round(complianceTotals.nonAligned / complianceTotals.total * 100) : 0}%)</span>
+                    <span className="font-extrabold text-rose-700 text-xs">{complianceTotals.nonAligned} {language === 'ar' ? 'استمارة' : 'forms'} ({complianceTotals.totalForms > 0 ? Math.round(complianceTotals.nonAligned / complianceTotals.totalForms * 100) : 0}%)</span>
                     <div className="w-20 md:w-24 bg-gradient-to-t from-rose-500 to-rose-400 rounded-t-xl transition-all duration-350 relative group flex items-end justify-center shadow-md shadow-rose-100/30" 
-                         style={{ height: `${complianceTotals.total > 0 ? (complianceTotals.nonAligned / complianceTotals.total) * 100 : 0}%`, minHeight: '12px' }}>
-                      <span className="absolute -bottom-6 text-[9.5px] font-bold text-rose-805">{language === 'ar' ? 'غير مطابق' : 'Non-aligned'}</span>
+                         style={{ height: `${complianceTotals.totalForms > 0 ? (complianceTotals.nonAligned / complianceTotals.totalForms) * 100 : 0}%`, minHeight: '12px' }}>
+                      <span className="absolute -bottom-6 text-[9.5px] font-bold text-rose-805 whitespace-nowrap">{language === 'ar' ? 'استمارات غير مطابقة' : 'Non-Conforming'}</span>
                     </div>
                   </div>
 
                   {/* Column 3: Grade adjustment */}
                   <div className="flex-1 flex flex-col items-center justify-end space-y-2">
-                    <span className="font-extrabold text-indigo-700 text-xs">{complianceTotals.gradeRevision} كراسات ({complianceTotals.total > 0 ? Math.round(complianceTotals.gradeRevision / complianceTotals.total * 100) : 0}%)</span>
+                    <span className="font-extrabold text-indigo-700 text-xs">{complianceTotals.gradeRevision} {language === 'ar' ? 'استمارة' : 'forms'} ({complianceTotals.totalForms > 0 ? Math.round(complianceTotals.gradeRevision / complianceTotals.totalForms * 100) : 0}%)</span>
                     <div className="w-20 md:w-24 bg-gradient-to-t from-indigo-600 to-indigo-400 rounded-t-xl transition-all duration-350 relative group flex items-end justify-center shadow-md shadow-indigo-100/30" 
-                         style={{ height: `${complianceTotals.total > 0 ? (complianceTotals.gradeRevision / complianceTotals.total) * 100 : 0}%`, minHeight: '12px' }}>
-                      <span className="absolute -bottom-6 text-[9.5px] font-bold text-indigo-805 whitespace-nowrap">{language === 'ar' ? 'تعديل درجات' : 'Grade Adjustment'}</span>
+                         style={{ height: `${complianceTotals.totalForms > 0 ? (complianceTotals.gradeRevision / complianceTotals.totalForms) * 100 : 0}%`, minHeight: '12px' }}>
+                      <div className="absolute -bottom-9 text-center">
+                        <span className="text-[9.5px] font-bold text-indigo-805 whitespace-nowrap block">{language === 'ar' ? 'منها: تعديل درجات' : 'Grade Revision'}</span>
+                        <span className="text-[8px] font-bold text-indigo-500 whitespace-nowrap block">({language === 'ar' ? 'صف 12 فقط' : 'G12 only'})</span>
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div className="h-6"></div>
+                <div className="h-8"></div>
               </div>
             ) : (
               /* ================= RENDER PIE CHART VIEW ================= */
@@ -1979,18 +1976,19 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                   <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
                     <circle cx="50" cy="50" r="40" fill="transparent" stroke="#F1F5F9" strokeWidth="15" />
                     {(() => {
-                      const totalVal = complianceTotals.total || 1;
-                      const alignedPct = (complianceTotals.aligned / totalVal);
-                      const nonAlignedPct = (complianceTotals.nonAligned / totalVal);
-                      const gradeRevPct = (complianceTotals.gradeRevision / totalVal);
+                      const totalVal = complianceTotals.totalForms || 1;
+                      const aligned = complianceTotals.aligned;
+                      const gradeRev = complianceTotals.gradeRevision;
+                      const otherNon = Math.max(0, complianceTotals.nonAligned - gradeRev);
 
-                      const strokeAligned = alignedPct * 251.2;
-                      const strokeNon = nonAlignedPct * 251.2;
-                      const strokeGrade = gradeRevPct * 251.2;
+                      const circumference = 251.2;
+                      const strokeAligned = (aligned / totalVal) * circumference;
+                      const strokeOtherNon = (otherNon / totalVal) * circumference;
+                      const strokeGrade = (gradeRev / totalVal) * circumference;
 
                       const offset1 = 0;
                       const offset2 = strokeAligned;
-                      const offset3 = strokeAligned + strokeNon;
+                      const offset3 = strokeAligned + strokeOtherNon;
 
                       return (
                         <>
@@ -2004,13 +2002,13 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                               strokeDashoffset={-offset1}
                             />
                           )}
-                          {strokeNon > 0 && (
+                          {strokeOtherNon > 0 && (
                             <circle 
                               cx="50" cy="50" r="40" 
                               fill="transparent" 
                               stroke="#F43F5E" 
                               strokeWidth="15" 
-                              strokeDasharray={`${strokeNon} 251.2`}
+                              strokeDasharray={`${strokeOtherNon} 251.2`}
                               strokeDashoffset={-offset2}
                             />
                           )}
@@ -2029,8 +2027,8 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                     })()}
                   </svg>
                   <div className="absolute inset-0 flex flex-col items-center justify-center bg-transparent mt-0.5 pointer-events-none">
-                    <span className="text-lg font-black text-[#051C3F] leading-none">{complianceTotals.total}</span>
-                    <span className="text-[8px] font-black text-slate-450 mt-0.5 uppercase tracking-wide">{language === 'ar' ? 'إجمالي' : 'Total'}</span>
+                    <span className="text-lg font-black text-[#051C3F] leading-none">{complianceTotals.totalForms}</span>
+                    <span className="text-[8px] font-black text-slate-450 mt-0.5 uppercase tracking-wide">{language === 'ar' ? 'استمارة جملية' : 'Total Forms'}</span>
                   </div>
                 </div>
 
@@ -2042,10 +2040,10 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 rounded bg-emerald-500 shrink-0"></div>
-                      <span className="font-bold text-slate-750">{language === 'ar' ? 'مطابق (مقبول ومعتمد)' : 'Aligned / Validated'}</span>
+                      <span className="font-bold text-slate-750">{language === 'ar' ? 'استمارات مطابقة' : 'Conforming Forms'}</span>
                     </div>
                     <strong className="text-emerald-700 text-sm font-extrabold shrink-0">
-                      {complianceTotals.aligned} كراسات ({complianceTotals.total > 0 ? Math.round(complianceTotals.aligned / complianceTotals.total * 100) : 0}%)
+                      {complianceTotals.aligned} {language === 'ar' ? 'استمارة' : 'forms'} ({complianceTotals.totalForms > 0 ? Math.round(complianceTotals.aligned / complianceTotals.totalForms * 100) : 0}%)
                     </strong>
                   </div>
 
@@ -2053,21 +2051,24 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 rounded bg-rose-500 shrink-0"></div>
-                      <span className="font-bold text-slate-750">{language === 'ar' ? 'غير مطابق (يحتاج مراجعات وتكرار)' : 'Non-aligned / Discrepancy'}</span>
+                      <span className="font-bold text-slate-750">{language === 'ar' ? 'استمارات غير مطابقة' : 'Non-Conforming Forms'}</span>
                     </div>
                     <strong className="text-rose-600 text-sm font-extrabold shrink-0">
-                      {complianceTotals.nonAligned} كراسات ({complianceTotals.total > 0 ? Math.round(complianceTotals.nonAligned / complianceTotals.total * 100) : 0}%)
+                      {complianceTotals.nonAligned} {language === 'ar' ? 'استمارة' : 'forms'} ({complianceTotals.totalForms > 0 ? Math.round(complianceTotals.nonAligned / complianceTotals.totalForms * 100) : 0}%)
                     </strong>
                   </div>
 
                   {/* Legend 3 */}
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between bg-indigo-50/60 p-2 rounded-xl border border-indigo-100">
                     <div className="flex items-center gap-2">
                       <div className="w-3 h-3 rounded bg-indigo-500 shrink-0"></div>
-                      <span className="font-bold text-slate-750">{language === 'ar' ? 'تعديل درجات وزمن الأوزان' : 'Required Grade Weight Adjustment'}</span>
+                      <div>
+                        <span className="font-bold text-indigo-950 block">{language === 'ar' ? 'منها: تعديل درجات (صف 12 فقط)' : 'Of which: Grade Revisions (G12)'}</span>
+                        <span className="text-[9px] text-indigo-600 font-semibold">{language === 'ar' ? '⚖️ جزء من الاستمارات غير المطابقة' : '⚖️ Subset of non-conforming forms'}</span>
+                      </div>
                     </div>
-                    <strong className="text-indigo-650 text-sm font-extrabold shrink-0">
-                      {complianceTotals.gradeRevision} كراسات ({complianceTotals.total > 0 ? Math.round(complianceTotals.gradeRevision / complianceTotals.total * 100) : 0}%)
+                    <strong className="text-indigo-800 text-sm font-extrabold shrink-0">
+                      {complianceTotals.gradeRevision} {language === 'ar' ? 'استمارة' : 'forms'} ({complianceTotals.totalForms > 0 ? Math.round(complianceTotals.gradeRevision / complianceTotals.totalForms * 100) : 0}%)
                     </strong>
                   </div>
 
@@ -2099,10 +2100,11 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
 
               <div className="space-y-5">
                 {wilayatComparisonData.map((wil, index) => {
-                  const itemsCount = wil.total || 1;
+                  const itemsCount = wil.totalForms || wil.total || 1;
                   const pctAligned = Math.round((wil.aligned / itemsCount) * 100);
-                  const pctNonAligned = Math.round((wil.nonAligned / itemsCount) * 100);
-                  const pctGradeRev = 100 - pctAligned - pctNonAligned;
+                  const otherNon = Math.max(0, wil.nonAligned - wil.gradeRevision);
+                  const pctOtherNon = Math.round((otherNon / itemsCount) * 100);
+                  const pctGradeRev = Math.max(0, 100 - pctAligned - pctOtherNon);
 
                   return (
                     <div key={`comp-wil-${wil.wilayaId}-${index}`} className="space-y-2 text-start">
@@ -2110,14 +2112,14 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                         <div className="flex items-center gap-2 text-slate-900 font-sans">
                           <span className="w-1.5 h-3 bg-indigo-700 rounded-xs inline-block"></span>
                           <span className="font-extrabold">{language === 'ar' ? wil.nameAr : wil.nameEn}</span>
-                          <span className="text-[10px] text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md font-mono font-bold shrink-0">
-                            {wil.total} {language === 'ar' ? 'كراسة' : 'total'}
+                          <span className="text-[10px] text-slate-500 bg-white border border-slate-200 px-1.5 py-0.5 rounded-md font-mono font-bold shrink-0">
+                            {wil.totalForms} {language === 'ar' ? 'استمارة' : 'forms'} ({wil.totalSamples} {language === 'ar' ? 'عينة' : 'samples'})
                           </span>
                         </div>
                         <div className="flex items-center gap-3 text-[10px] font-bold">
                           <span className="text-emerald-700">✓ {language === 'ar' ? 'مطابق:' : 'Aligned:'} {pctAligned}%</span>
-                          <span className="text-rose-600">⚠️ {language === 'ar' ? 'غير مطابق:' : 'Issues:'} {pctNonAligned}%</span>
-                          <span className="text-indigo-650">⚖️ {language === 'ar' ? 'تعديل:' : 'Revision:'} {pctGradeRev}%</span>
+                          <span className="text-rose-600">⚠️ {language === 'ar' ? 'غير مطابق:' : 'Issues:'} {pctOtherNon}%</span>
+                          <span className="text-indigo-650">⚖️ {language === 'ar' ? 'تعديل درجات (صف 12):' : 'Grade Revision (G12):'} {pctGradeRev}%</span>
                         </div>
                       </div>
 
@@ -2127,25 +2129,25 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                           <div 
                             className="bg-emerald-500 h-full relative group hover:opacity-90 transition-opacity cursor-pointer flex items-center justify-center text-[9px] text-white font-extrabold font-sans" 
                             style={{ width: `${pctAligned}%` }} 
-                            title={`${wil.aligned} مطابق`}
+                            title={`${wil.aligned} ${language === 'ar' ? 'استمارة مطابقة' : 'aligned'}`}
                           >
                             {pctAligned > 12 && `${pctAligned}%`}
                           </div>
                         )}
-                        {wil.nonAligned > 0 && (
+                        {otherNon > 0 && (
                           <div 
                             className="bg-rose-500 h-full relative group hover:opacity-90 transition-opacity cursor-pointer flex items-center justify-center text-[9px] text-white font-extrabold font-sans" 
-                            style={{ width: `${pctNonAligned}%` }} 
-                            title={`${wil.nonAligned} غير مطابق`}
+                            style={{ width: `${pctOtherNon}%` }} 
+                            title={`${otherNon} ${language === 'ar' ? 'استمارة غير مطابقة (ملاحظات تدقيقية)' : 'non-conforming'}`}
                           >
-                            {pctNonAligned > 12 && `${pctNonAligned}%`}
+                            {pctOtherNon > 12 && `${pctOtherNon}%`}
                           </div>
                         )}
                         {wil.gradeRevision > 0 && (
                           <div 
                             className="bg-indigo-500 h-full relative group hover:opacity-90 transition-opacity cursor-pointer flex items-center justify-center text-[9px] text-white font-extrabold font-sans" 
                             style={{ width: `${pctGradeRev}%` }} 
-                            title={`${wil.gradeRevision} تعديل درجات`}
+                            title={`${wil.gradeRevision} ${language === 'ar' ? 'استمارة بتعديل درجات (فحص نهائي صف 12 فقط)' : 'grade revision (subset)'}`}
                           >
                             {pctGradeRev > 12 && `${pctGradeRev}%`}
                           </div>
@@ -2160,15 +2162,15 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
               <div className="flex flex-wrap items-center justify-center gap-4 pt-3.5 border-t border-slate-150 text-[10px] font-black text-slate-500 font-sans">
                 <div className="flex items-center gap-1.5">
                   <div className="w-3.5 h-3 rounded bg-emerald-500"></div>
-                  <span>{language === 'ar' ? 'مطابق (صحيح ومعتمد)' : 'Aligned / Verified'}</span>
+                  <span>{language === 'ar' ? 'مطابق (مقبول ومعتمد)' : 'Aligned / Verified'}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-3.5 h-3 rounded bg-rose-500"></div>
-                  <span>{language === 'ar' ? 'غير مطابق (تحت المراجعة والتعديل)' : 'Non-aligned / Discrepancy'}</span>
+                  <span>{language === 'ar' ? 'غير مطابق (ملاحظات تدقيقية ومراجعة)' : 'Non-aligned / Discrepancy'}</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <div className="w-3.5 h-3 rounded bg-indigo-500"></div>
-                  <span>{language === 'ar' ? 'مواءمة درجات (تعديل الدرجات والأوزان)' : 'Weight Adjustment / Revision'}</span>
+                  <span>{language === 'ar' ? 'منها: تعديل درجات (فحص نهائي صف 12 فقط)' : 'Subset: Grade Revision (Grade 12 final only)'}</span>
                 </div>
               </div>
 
@@ -2179,22 +2181,32 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
               <div className="overflow-x-auto">
                 <table className={`w-full ${language === 'ar' ? 'text-right' : 'text-left'} border-collapse`} dir={language === 'ar' ? 'rtl' : 'ltr'}>
                   <thead>
-                    <tr className="bg-slate-50 border-b border-slate-150 text-[10.5px] font-extrabold uppercase tracking-wider text-slate-400 font-sans">
-                      <th className="py-2.5 px-4 text-slate-600">{language === 'ar' ? 'الولاية بمحافظة الوسطى' : 'Regional District'}</th>
-                      <th className="py-2.5 px-3 text-center text-emerald-700 font-bold bg-emerald-50/20">{language === 'ar' ? 'مطابِق (كراسات)' : 'Aligned'}</th>
-                      <th className="py-2.5 px-3 text-center text-rose-700 font-bold bg-rose-50/20">{language === 'ar' ? 'غير مطابِق (كراسات)' : 'Non-Compliant'}</th>
-                      <th className="py-2.5 px-3 text-center text-indigo-700 font-bold bg-indigo-50/20">{language === 'ar' ? 'تعديل درجات' : 'Grade Revision'}</th>
-                      <th className="py-2.5 px-4 text-center text-slate-800 font-bold">{language === 'ar' ? 'مجموع الكراسات الموثقة' : 'Total Evaluated'}</th>
-                      <th className="py-2.5 px-4 text-center text-slate-600">{language === 'ar' ? 'معدل جودة ومطابقة المنهج' : 'Weighted Compliance Rate'}</th>
+                    <tr className="bg-slate-50 border-b border-slate-150 text-[10.5px] font-extrabold uppercase tracking-wider text-slate-500 font-sans">
+                      <th className="py-2.5 px-4 text-start text-slate-700">{language === 'ar' ? 'الولاية بمحافظة الوسطى' : 'Regional District'}</th>
+                      <th className="py-2.5 px-3 text-center text-slate-800 font-black">{language === 'ar' ? 'عدد الاستمارات الجملية' : 'Total Forms'}</th>
+                      <th className="py-2.5 px-3 text-center text-blue-700 font-black bg-blue-50/20">{language === 'ar' ? 'عدد العينات للفحص (6 لكل استمارة)' : 'Samples (6/form)'}</th>
+                      <th className="py-2.5 px-3 text-center text-emerald-700 font-bold bg-emerald-50/20">{language === 'ar' ? 'استمارات مطابقة ✓' : 'Conforming'}</th>
+                      <th className="py-2.5 px-3 text-center text-rose-700 font-bold bg-rose-50/20">{language === 'ar' ? 'استمارات غير مطابقة ⚠️' : 'Non-Conforming'}</th>
+                      <th className="py-2.5 px-3 text-center text-indigo-700 font-bold bg-indigo-50/20">
+                        <span className="block leading-tight">{language === 'ar' ? 'منها: تعديل درجات ⚖️' : 'Grade Rev.'}</span>
+                        <span className="text-[8.5px] font-medium text-indigo-500 block">({language === 'ar' ? 'صف 12 فقط' : 'G12 only'})</span>
+                      </th>
+                      <th className="py-2.5 px-4 text-center text-slate-700">{language === 'ar' ? 'معدل المطابقة والاعتماد' : 'Compliance Rate'}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium">
                     {wilayatComparisonData.map((wil, index) => {
-                      const complianceRate = wil.total > 0 ? Math.round((wil.aligned / wil.total) * 100) : 0;
+                      const complianceRate = wil.totalForms > 0 ? Math.round((wil.aligned / wil.totalForms) * 100) : 0;
                       return (
                         <tr key={`comp-wil-tab-${wil.wilayaId}-${index}`} className="hover:bg-slate-50/60 transition-colors">
-                          <td className="py-2.5 px-4 font-bold text-slate-800">
+                          <td className="py-2.5 px-4 font-bold text-slate-800 text-start">
                             {language === 'ar' ? wil.nameAr : wil.nameEn}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-black text-slate-800">
+                            {wil.totalForms}
+                          </td>
+                          <td className="py-2.5 px-3 text-center font-black text-blue-900 bg-blue-50/15">
+                            {wil.totalSamples}
                           </td>
                           <td className="py-2.5 px-3 text-center text-emerald-805 font-bold bg-emerald-50/5">
                             {wil.aligned}
@@ -2203,10 +2215,9 @@ export function AdminStatsDashboard({ assessments, language = 'en' }: AdminStats
                             {wil.nonAligned}
                           </td>
                           <td className="py-2.5 px-3 text-center text-indigo-805 font-bold bg-indigo-50/5">
-                            {wil.gradeRevision}
-                          </td>
-                          <td className="py-2.5 px-4 text-center font-extrabold text-slate-750">
-                            {wil.aligned + wil.nonAligned + wil.gradeRevision}
+                            <span className="inline-flex items-center gap-1 bg-indigo-100/70 text-indigo-900 px-2 py-0.5 rounded font-black text-[11px]" title={language === 'ar' ? 'جزء من الاستمارات غير المطابقة - فحص نهائي صف 12 فقط' : 'Subset of non-conforming (Grade 12 final only)'}>
+                              {wil.gradeRevision}
+                            </span>
                           </td>
                           <td className="py-2.5 px-4 text-center font-black text-emerald-700">
                             {complianceRate}%

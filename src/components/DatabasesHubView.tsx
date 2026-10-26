@@ -39,7 +39,7 @@ export function DatabasesHubView({ language, subjects }: DatabasesHubViewProps) 
             </div>
             <div>
               <h1 className="text-xl md:text-2xl font-black text-[#051C3F] tracking-tight">
-                {isRtl ? '🗄️ المركز الوطني لقواعد البيانات والأنظمة' : '🗄️ National Central Databases Hub'}
+                {isRtl ? 'قواعد البيانات' : 'Databases'}
               </h1>
               <p className="text-xs text-slate-400 font-bold mt-1.5 leading-relaxed">
                 {isRtl 

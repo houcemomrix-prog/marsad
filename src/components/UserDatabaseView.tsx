@@ -17,7 +17,12 @@ import {
   UserCheck,
   Search,
   Filter,
-  Shield
+  Shield,
+  Copy,
+  Check,
+  RefreshCw,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 
 import { auth } from '../services/firebase';
@@ -27,6 +32,19 @@ import { UserProfile, UserRole } from '../types';
 import { getAllUserProfiles, createUserProfile, deleteUserProfileAdmin } from '../services/db';
 import { Language, translateSubject, translateGrade } from '../lib/translations';
 import { OMAN_WUSTA_SCHOOLS } from '../data/schoolsData';
+
+// Helper to generate a strong, clear, memorable ministerial password
+export const generateStrongPassword = (): string => {
+  const prefixes = ['Moe', 'Oman', 'Edu', 'Wusta', 'Syllabus'];
+  const symbols = ['@', '#', '$', '!', '&'];
+  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+  const sym = symbols[Math.floor(Math.random() * symbols.length)];
+  const digits = Math.floor(1000 + Math.random() * 9000); // 4 digits
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+  const c1 = chars[Math.floor(Math.random() * chars.length)];
+  const c2 = chars[Math.floor(Math.random() * chars.length)];
+  return `${prefix}${sym}${digits}${c1}${c2}`;
+};
 
 interface UserDatabaseViewProps {
   language: Language;
@@ -60,17 +78,56 @@ export function UserDatabaseView({ language, subjects }: UserDatabaseViewProps) 
   const [resetLoading, setResetLoading] = useState(false);
   const [resetError, setResetError] = useState<string | null>(null);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [copiedPassword, setCopiedPassword] = useState(false);
+  const [showResetPasswordText, setShowResetPasswordText] = useState(true);
+  const [resetLastUpdatedEmail, setResetLastUpdatedEmail] = useState('');
+  const [resetLastUpdatedPassword, setResetLastUpdatedPassword] = useState('');
+
+  // Handler to open password reset tool modal
+  const handleOpenResetPasswordModal = (targetEmail: string = '', autoGenerate: boolean = false) => {
+    setResetSearchEmail(targetEmail);
+    if (autoGenerate) {
+      const autoPass = generateStrongPassword();
+      setResetNewPassword(autoPass);
+    } else {
+      setResetNewPassword('');
+    }
+    setCopiedPassword(false);
+    setResetError(null);
+    setResetSuccess(null);
+    setShowResetPasswordText(true);
+    setIsResetPasswordModalOpen(true);
+  };
+
+  // Handler to generate another new password
+  const handleRegeneratePassword = () => {
+    const autoPass = generateStrongPassword();
+    setResetNewPassword(autoPass);
+    setCopiedPassword(false);
+  };
+
+  // Copy password to clipboard
+  const handleCopyPassword = (textToCopy?: string) => {
+    const text = textToCopy || resetNewPassword;
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedPassword(true);
+    setTimeout(() => setCopiedPassword(false), 2500);
+  };
 
   const handleForcePasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!resetSearchEmail.trim() || !resetNewPassword) {
-      setResetError('Please enter both email and new password');
+      setResetError(language === 'ar' ? 'يرجى إدخال البريد الإلكتروني وكلمة المرور الجديدة' : 'Please enter both email and new password');
       return;
     }
     
     setResetLoading(true);
     setResetError(null);
     setResetSuccess(null);
+
+    const emailTrimmed = resetSearchEmail.trim();
+    const passwordToSet = resetNewPassword;
 
     try {
       // Get the admin's current token or fall back to active admin session token
@@ -90,7 +147,7 @@ export function UserDatabaseView({ language, subjects }: UserDatabaseViewProps) 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ email: resetSearchEmail.trim(), newPassword: resetNewPassword })
+        body: JSON.stringify({ email: emailTrimmed, newPassword: passwordToSet })
       });
 
       const data = await response.json();
@@ -102,13 +159,15 @@ export function UserDatabaseView({ language, subjects }: UserDatabaseViewProps) 
       // Sync local passwords storage for sandbox / instant login
       try {
         const savedPasswords = JSON.parse(localStorage.getItem('oman_moe_custom_passwords') || '{}');
-        savedPasswords[resetSearchEmail.trim().toLowerCase()] = resetNewPassword;
+        savedPasswords[emailTrimmed.toLowerCase()] = passwordToSet;
         localStorage.setItem('oman_moe_custom_passwords', JSON.stringify(savedPasswords));
       } catch (e) {
         console.warn('Could not sync custom passwords:', e);
       }
 
-      setResetSuccess(data.message || 'Password successfully updated.');
+      setResetLastUpdatedEmail(emailTrimmed);
+      setResetLastUpdatedPassword(passwordToSet);
+      setResetSuccess(data.message || (language === 'ar' ? `تم تغيير وتعيين كلمة المرور بنجاح للمستخدم (${emailTrimmed}).` : 'Password successfully updated.'));
       setResetSearchEmail('');
       setResetNewPassword('');
     } catch (err: any) {
@@ -357,16 +416,11 @@ export function UserDatabaseView({ language, subjects }: UserDatabaseViewProps) 
         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
           <button
             type="button"
-            onClick={() => {
-              setResetSearchEmail('');
-              setResetNewPassword('');
-              setResetError(null);
-              setResetSuccess(null);
-              setIsResetPasswordModalOpen(true);
-            }}
-            className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold font-heading flex items-center justify-center gap-2 cursor-pointer transition-all shadow-sm active:scale-95"
+            onClick={() => handleOpenResetPasswordModal('')}
+            className="w-full sm:w-auto px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold font-heading flex items-center justify-center gap-2 cursor-pointer transition-all shadow-sm active:scale-95 group"
+            title={language === 'ar' ? 'توليد وإعادة تعيين كلمة مرور تلقائياً' : 'Auto-Generate & Force Reset Password'}
           >
-            <Lock className="w-4 h-4" />
+            <Lock className="w-4 h-4 text-rose-600 group-hover:rotate-6 transition-transform" />
             <span>{language === 'ar' ? 'إعادة تعيين كلمة المرور' : 'Force Reset Password'}</span>
           </button>
           <button
@@ -684,15 +738,9 @@ export function UserDatabaseView({ language, subjects }: UserDatabaseViewProps) 
                         {/* Reset Password Button */}
                         <button
                           type="button"
-                          onClick={() => {
-                            setResetSearchEmail(u.email);
-                            setResetNewPassword('');
-                            setResetError(null);
-                            setResetSuccess(null);
-                            setIsResetPasswordModalOpen(true);
-                          }}
+                          onClick={() => handleOpenResetPasswordModal(u.email)}
                           className="p-1.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-800 transition-all cursor-pointer"
-                          title={language === 'ar' ? `تغيير كلمة المرور للمستخدم (${u.email})` : `Reset Password for ${u.email}`}
+                          title={language === 'ar' ? `توليد وإعادة تعيين كلمة المرور للمستخدم (${u.email})` : `Generate & Reset Password for ${u.email}`}
                         >
                           <Key className="w-3.5 h-3.5" />
                         </button>
@@ -1088,85 +1136,227 @@ export function UserDatabaseView({ language, subjects }: UserDatabaseViewProps) 
       {isResetPasswordModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsResetPasswordModalOpen(false)}></div>
-          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-              <h3 className="font-heading font-black text-lg text-[#0B1E40]">
-                {language === 'ar' ? 'إعادة تعيين كلمة مرور المستخدم' : 'Force Reset User Password'}
-              </h3>
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl relative z-10 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in-95 duration-200" dir={language === 'ar' ? 'rtl' : 'ltr'}>
+            
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-gradient-to-r from-rose-50/60 to-slate-50/80">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center shadow-sm">
+                  <KeyRound className="w-5 h-5 text-amber-300" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-black text-base text-[#0B1E40]">
+                    {language === 'ar' ? 'إعادة تعيين وتوليد كلمة المرور' : 'Force Reset & Generate Password'}
+                  </h3>
+                  <p className="text-[11px] font-bold text-slate-500 mt-0.5">
+                    {language === 'ar' ? 'توليد تلقائي لكلمة مرور مؤقتة وآمنة' : 'Automatic strong password generator'}
+                  </p>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => setIsResetPasswordModalOpen(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 transition-colors cursor-pointer"
+                title={language === 'ar' ? 'إغلاق' : 'Close'}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="p-5 overflow-y-auto">
-              <p className="text-xs text-slate-500 mb-4 leading-relaxed">
+
+            <div className="p-5 overflow-y-auto space-y-4">
+              <p className="text-xs text-slate-500 leading-relaxed font-sans">
                 {language === 'ar' 
-                  ? 'قم بإدخال البريد الإلكتروني للمستخدم وكلمة المرور المؤقتة الجديدة. سيتم تعيينها مباشرة عبر صلاحيات المسؤول ولن يتم إرسال أي بريد إلكتروني.' 
-                  : 'Enter the user\'s email address and a new temporary password. It will be forcefully updated using admin privileges. No email will be sent.'}
+                  ? 'تم توليد كلمة مرور عشوائية قوية تلقائياً عند النقر على الأداة. يمكنك اعتمادها مباشرة أو توليد كلمة أخرى ونسخها للمستخدم.' 
+                  : 'A strong temporary password has been automatically generated upon clicking the tool. You can apply it directly, regenerate another, or copy it.'}
               </p>
               
+              {/* Error Message */}
               {resetError && (
-                <div className="mb-4 p-3 rounded-xl text-xs font-bold flex items-center gap-2 bg-rose-50 text-rose-700 border border-rose-200">
+                <div className="p-3.5 rounded-2xl text-xs font-bold flex items-center gap-2 bg-rose-50 text-rose-700 border border-rose-200 animate-in fade-in">
                   <ShieldAlert className="w-4 h-4 shrink-0" />
                   <span>{resetError}</span>
                 </div>
               )}
+
+              {/* Success Message */}
               {resetSuccess && (
-                <div className="mb-4 p-3 rounded-xl text-xs font-bold flex items-center gap-2 bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  <CheckCircle className="w-4 h-4 shrink-0" />
-                  <span>{resetSuccess}</span>
+                <div className="p-4 rounded-2xl text-xs font-bold space-y-2.5 bg-emerald-50 text-emerald-800 border border-emerald-200 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-5 h-5 shrink-0 text-emerald-600" />
+                    <span>{resetSuccess}</span>
+                  </div>
+
+                  {resetLastUpdatedPassword && (
+                    <div className="p-3 bg-white rounded-xl border border-emerald-200 flex items-center justify-between text-slate-800 gap-2">
+                      <div className="truncate">
+                        <span className="text-[10px] text-slate-400 block font-sans">
+                          {language === 'ar' ? 'كلمة المرور المولدة والمعتمدة:' : 'Applied Generated Password:'}
+                        </span>
+                        <span className="font-mono font-black text-sm tracking-wider text-emerald-900 select-all">
+                          {resetLastUpdatedPassword}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopyPassword(resetLastUpdatedPassword)}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold flex items-center gap-1.5 cursor-pointer shadow-xs shrink-0"
+                      >
+                        {copiedPassword ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{language === 'ar' ? 'تم النسخ' : 'Copied!'}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>{language === 'ar' ? 'نسخ' : 'Copy'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="pt-1 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetSuccess(null);
+                        setResetError(null);
+                        handleRegeneratePassword();
+                      }}
+                      className="text-[11px] font-extrabold text-emerald-700 hover:text-emerald-900 hover:underline cursor-pointer"
+                    >
+                      {language === 'ar' ? '🔄 إعادة تعيين لمستخدم آخر' : '🔄 Reset another user'}
+                    </button>
+                  </div>
                 </div>
               )}
 
-              <form onSubmit={handleForcePasswordReset} className="space-y-4">
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-extrabold text-slate-400 block uppercase tracking-wider">
-                    {language === 'ar' ? 'البريد الإلكتروني المستهدف' : 'Target Email Address'}
-                  </label>
-                  <input
-                    type="email"
-                    required
-                    value={resetSearchEmail}
-                    onChange={(e) => setResetSearchEmail(e.target.value)}
-                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs text-slate-800 bg-white focus:outline-none focus:border-[#051C3F] font-bold"
-                    placeholder="name@moe.om"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-extrabold text-slate-400 block uppercase tracking-wider">
-                    {language === 'ar' ? 'كلمة المرور الجديدة' : 'New Temporary Password'}
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={resetNewPassword}
-                    onChange={(e) => setResetNewPassword(e.target.value)}
-                    minLength={6}
-                    className="w-full px-3 py-2.5 border border-slate-200 rounded-xl text-xs text-slate-800 bg-white focus:outline-none focus:border-[#051C3F] font-bold"
-                    placeholder="New password (min 6 chars)"
-                  />
-                </div>
-                
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    disabled={resetLoading || !!resetSuccess}
-                    className="w-full py-3 bg-rose-600 hover:bg-rose-700 disabled:bg-rose-400 text-white rounded-xl text-xs font-black transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    {resetLoading ? (
-                      <span className="animate-pulse">{language === 'ar' ? 'جاري المعالجة...' : 'Processing...'}</span>
+              {!resetSuccess && (
+                <form onSubmit={handleForcePasswordReset} className="space-y-4 font-sans">
+                  
+                  {/* Target Email */}
+                  <div className="space-y-1.5">
+                    <label className="text-[10.5px] font-extrabold text-slate-600 block uppercase tracking-wider">
+                      {language === 'ar' ? 'البريد الإلكتروني الوزاري للمستخدم' : 'Target Ministerial Email (@moe.om)'}
+                    </label>
+                    <input
+                      type="email"
+                      required
+                      value={resetSearchEmail}
+                      onChange={(e) => setResetSearchEmail(e.target.value)}
+                      className="w-full px-3.5 py-2.5 border border-slate-200 rounded-xl text-xs text-slate-900 bg-white focus:outline-none focus:border-[#051C3F] focus:ring-1 focus:ring-[#051C3F] font-bold transition-all"
+                      placeholder="username@moe.om"
+                      dir="ltr"
+                    />
+                  </div>
+
+                  {/* Auto-Generated Password Field */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10.5px] font-extrabold text-slate-700 block uppercase tracking-wider flex items-center gap-1.5 font-sans">
+                        <span>{language === 'ar' ? 'كلمة المرور الجديدة' : 'New Password'}</span>
+                        {resetNewPassword && (
+                          <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded text-[9.5px] font-extrabold">
+                            {language === 'ar' ? 'تم التوليد ✓' : 'Generated ✓'}
+                          </span>
+                        )}
+                      </label>
+                      
+                      {/* Generate Password Button */}
+                      <button
+                        type="button"
+                        onClick={handleRegeneratePassword}
+                        className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/80 text-[11px] font-extrabold flex items-center gap-1.5 cursor-pointer transition-all shadow-2xs active:scale-95"
+                        title={language === 'ar' ? 'توليد كلمة مرور عشوائية جديدة' : 'Generate new random password'}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+                        <span>{resetNewPassword ? (language === 'ar' ? 'توليد كلمة أخرى' : 'Regenerate') : (language === 'ar' ? 'توليد كلمة مرور جديدة' : 'Generate Password')}</span>
+                      </button>
+                    </div>
+
+                    <div className="relative">
+                      <input
+                        type={showResetPasswordText ? 'text' : 'password'}
+                        required
+                        value={resetNewPassword}
+                        onChange={(e) => setResetNewPassword(e.target.value)}
+                        minLength={6}
+                        className="w-full px-3.5 py-2.5 pl-28 pr-4 text-right border border-indigo-200 bg-indigo-50/20 rounded-xl text-xs text-indigo-950 font-mono font-black tracking-wider focus:outline-none focus:border-indigo-600 focus:bg-white transition-all placeholder:font-sans placeholder:font-normal placeholder:text-slate-400 placeholder:text-right"
+                        placeholder={language === 'ar' ? 'انقر على "توليد كلمة مرور جديدة"...' : 'Click "Generate Password"...'}
+                      />
+                      
+                      {/* Copy and Eye Toggle buttons inside input on the left (pl-28 provides generous clearance) */}
+                      <div className="absolute top-1/2 -translate-y-1/2 left-2 flex items-center gap-1 z-10">
+                        <button
+                          type="button"
+                          onClick={() => setShowResetPasswordText(!showResetPasswordText)}
+                          className="p-1 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer rounded"
+                          title={showResetPasswordText ? (language === 'ar' ? 'إخفاء' : 'Hide') : (language === 'ar' ? 'إظهار' : 'Show')}
+                        >
+                          {showResetPasswordText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                        </button>
+                        
+                        {resetNewPassword && (
+                          <button
+                            type="button"
+                            onClick={() => handleCopyPassword()}
+                            className={`px-2 py-1 rounded-lg text-[10px] font-black transition-all flex items-center gap-1 cursor-pointer ${
+                              copiedPassword 
+                                ? 'bg-emerald-600 text-white shadow-2xs' 
+                                : 'bg-indigo-100 hover:bg-indigo-200 text-indigo-800'
+                            }`}
+                            title={language === 'ar' ? 'نسخ كلمة المرور للحافظة' : 'Copy password to clipboard'}
+                          >
+                            {copiedPassword ? (
+                              <>
+                                <Check className="w-3 h-3" />
+                                <span>{language === 'ar' ? 'تم النسخ' : 'Copied'}</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span>{language === 'ar' ? 'نسخ' : 'Copy'}</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Generator notice badge */}
+                    {!resetNewPassword ? (
+                      <div className="p-2.5 bg-amber-50/90 border border-amber-200/80 rounded-xl flex items-center gap-2 text-[10.5px] text-amber-900 font-bold">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>{language === 'ar' ? 'اضغط على زر "توليد كلمة مرور جديدة" بالفقرة العلوية لتوليد وتجهيز كلمة المرور.' : 'Click "Generate Password" above to create a password.'}</span>
+                      </div>
                     ) : (
-                      <>
-                        <Lock className="w-4 h-4" />
-                        <span>{language === 'ar' ? 'تأكيد تغيير كلمة المرور' : 'Confirm Password Change'}</span>
-                      </>
+                      <div className="p-2.5 bg-indigo-50 border border-indigo-100/80 rounded-xl flex items-center gap-2 text-[10.5px] text-indigo-900 font-bold">
+                        <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span>{language === 'ar' ? 'تم توليد كلمة المرور بنجاح وترتيبها على اليمين بدون تداخل. انقر على الزر لتطبيقها.' : 'Password generated successfully. Click button below to apply.'}</span>
+                      </div>
                     )}
-                  </button>
-                </div>
-              </form>
+                  </div>
+                  
+                  {/* Submit Button */}
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      disabled={resetLoading}
+                      className="w-full py-3 bg-[#051C3F] hover:bg-[#124282] disabled:bg-slate-400 text-white rounded-xl text-xs font-black transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {resetLoading ? (
+                        <span className="animate-pulse">{language === 'ar' ? 'جاري تعيين كلمة المرور...' : 'Updating password...'}</span>
+                      ) : (
+                        <>
+                          <KeyRound className="w-4 h-4 text-amber-400" />
+                          <span>{language === 'ar' ? 'اعتماد وتطبيق كلمة المرور للمستخدم' : 'Apply Password to User'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
+              )}
             </div>
           </div>
         </div>

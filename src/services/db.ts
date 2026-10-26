@@ -137,7 +137,7 @@ const INITIAL_SANDBOX_USERS: Record<string, UserProfile> = {
     email: 'moderator@moe.om',
     role: 'moderator',
     jobTitle: 'مشرف ومدقق تربوي',
-    subject: 'All Subjects',
+    subject: 'Mathematics',
     directorate: LINKED_EXPERIMENT_GOVERNORATE_AR,
     wilaya: 'duqm',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10).toISOString()
@@ -2026,6 +2026,310 @@ export async function markTeacherNotificationRead(notificationId: string): Promi
     await updateDoc(docRef, { read: true });
   } catch (error) {
     console.error('Error marking notification read:', error);
+  }
+}
+
+// --- 5-STEP UPLOAD LIFECYCLE: SCHOOL INSPECTION PLANS & UPLOADS WORKFLOW ---
+import { SchoolInspectionPlan } from '../types';
+
+const SANDBOX_INSPECTION_PLANS_KEY = 'oman_moe_sandbox_inspection_plans_v1';
+
+const INITIAL_SANDBOX_INSPECTION_PLANS: SchoolInspectionPlan[] = [
+  {
+    id: 'plan_duqm',
+    schoolId: 'school_duqm',
+    schoolName: LINKED_EXPERIMENT_SCHOOL_AR,
+    inspectionDate: '2026-10-26',
+    adminUnlocked: true,
+    principalUnlocked: true,
+    adminUnlockedAt: new Date().toISOString(),
+    principalUnlockedAt: new Date().toISOString(),
+    notes: 'تاريخ الفحص المحدد - تم فتح صلاحية الرفع للمدرسة والمعلمين',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'plan_soqra',
+    schoolId: 'school_soqra',
+    schoolName: 'صوقرة للتعليم الأساسي',
+    inspectionDate: '2026-10-28',
+    adminUnlocked: true,
+    principalUnlocked: false,
+    adminUnlockedAt: new Date().toISOString(),
+    notes: 'تم فتح صلاحية الرفع من مدير النظام - بانتظار تفعيل مدير المدرسة للمعلمين',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'plan_haima',
+    schoolId: 'school_haima',
+    schoolName: 'مدرسة هيماء للتعليم الأساسي',
+    inspectionDate: '2026-11-02',
+    adminUnlocked: false,
+    principalUnlocked: false,
+    notes: 'موعد الفحص المجدول القادم وفق الخطة الوزارية',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'plan_mahout',
+    schoolId: 'school_mahout',
+    schoolName: 'مدرسة محوت للتعليم الأساسي',
+    inspectionDate: '2026-11-09',
+    adminUnlocked: false,
+    principalUnlocked: false,
+    notes: 'موعد الفحص المجدول وفق الخطة الوزارية',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  }
+];
+
+export async function getInspectionPlans(): Promise<SchoolInspectionPlan[]> {
+  if (isSandboxActive()) {
+    return getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
+  }
+
+  try {
+    const q = collection(db, 'inspection_plans');
+    const snap = await getDocs(q);
+    const list: SchoolInspectionPlan[] = [];
+    snap.forEach((d) => {
+      const data = d.data();
+      list.push({
+        id: d.id,
+        schoolId: data.schoolId || d.id,
+        schoolName: data.schoolName,
+        inspectionDate: data.inspectionDate,
+        adminUnlocked: data.adminUnlocked ?? false,
+        principalUnlocked: data.principalUnlocked ?? false,
+        adminUnlockedAt: data.adminUnlockedAt,
+        principalUnlockedAt: data.principalUnlockedAt,
+        notes: data.notes || '',
+        createdAt: data.createdAt || new Date().toISOString(),
+        updatedAt: data.updatedAt || new Date().toISOString()
+      });
+    });
+    return list;
+  } catch (error) {
+    console.warn('Error fetching inspection plans from firestore, using local state:', error);
+    return getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
+  }
+}
+
+export async function saveInspectionPlan(plan: Partial<SchoolInspectionPlan> & { schoolName: string }): Promise<void> {
+  const now = new Date().toISOString();
+  if (isSandboxActive()) {
+    const plans = getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
+    const existingIdx = plans.findIndex(p => isSameSchoolLocal(p.schoolName, plan.schoolName));
+    if (existingIdx !== -1) {
+      plans[existingIdx] = {
+        ...plans[existingIdx],
+        ...plan,
+        updatedAt: now
+      };
+    } else {
+      plans.push({
+        id: 'plan_' + Math.random().toString(36).substring(2, 9),
+        schoolId: plan.schoolId || 'school_' + Math.random().toString(36).substring(2, 7),
+        schoolName: plan.schoolName,
+        inspectionDate: plan.inspectionDate || '2026-11-01',
+        adminUnlocked: plan.adminUnlocked ?? false,
+        principalUnlocked: plan.principalUnlocked ?? false,
+        notes: plan.notes || '',
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+    setSandboxData(SANDBOX_INSPECTION_PLANS_KEY, plans);
+    return;
+  }
+
+  try {
+    const plansRef = collection(db, 'inspection_plans');
+    const q = query(plansRef, where('schoolName', '==', plan.schoolName));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const docId = snap.docs[0].id;
+      await updateDoc(doc(db, 'inspection_plans', docId), {
+        ...plan,
+        updatedAt: now
+      });
+    } else {
+      await addDoc(plansRef, {
+        schoolId: plan.schoolId || 'school_' + Math.random().toString(36).substring(2, 7),
+        schoolName: plan.schoolName,
+        inspectionDate: plan.inspectionDate || '2026-11-01',
+        adminUnlocked: plan.adminUnlocked ?? false,
+        principalUnlocked: plan.principalUnlocked ?? false,
+        notes: plan.notes || '',
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+  } catch (e) {
+    console.error('Error saving inspection plan:', e);
+  }
+}
+
+export async function toggleAdminUploadPermission(schoolName: string, unlocked: boolean): Promise<void> {
+  await saveInspectionPlan({
+    schoolName,
+    adminUnlocked: unlocked,
+    adminUnlockedAt: unlocked ? new Date().toISOString() : undefined,
+    // If admin locks it, also lock principal's permission
+    ...(unlocked ? {} : { principalUnlocked: false })
+  });
+}
+
+export async function togglePrincipalUploadPermission(schoolName: string, unlocked: boolean): Promise<{ success: boolean; message?: string }> {
+  const status = await getSchoolUploadPermissionStatus(schoolName);
+  if (unlocked && !status.adminUnlocked) {
+    return {
+      success: false,
+      message: 'عذراً، لا يمكنك فتح الصلاحية للمعلمين قبل أن يقوم مدير النظام بفتح الصلاحية لمدرستك أولاً وفق خطة الفحص.'
+    };
+  }
+  await saveInspectionPlan({
+    schoolName,
+    principalUnlocked: unlocked,
+    principalUnlockedAt: unlocked ? new Date().toISOString() : undefined
+  });
+  return { success: true };
+}
+
+export async function getSchoolUploadPermissionStatus(schoolName: string): Promise<{
+  adminUnlocked: boolean;
+  principalUnlocked: boolean;
+  canTeacherUpload: boolean;
+  inspectionDate: string;
+  notes?: string;
+}> {
+  const plans = await getInspectionPlans();
+  const matched = plans.find(p => isSameSchoolLocal(p.schoolName, schoolName));
+
+  if (!matched) {
+    // Default fallback: Duqm is unlocked for testing, others require admin setup
+    const isDuqm = isSameSchoolLocal(schoolName, LINKED_EXPERIMENT_SCHOOL_AR);
+    return {
+      adminUnlocked: isDuqm,
+      principalUnlocked: isDuqm,
+      canTeacherUpload: isDuqm,
+      inspectionDate: '2026-10-26',
+      notes: isDuqm ? 'مفتوحة تلقائياً' : 'مطلوب إدراج خطة الفحص من مدير النظام'
+    };
+  }
+
+  const canUpload = matched.adminUnlocked && matched.principalUnlocked;
+  return {
+    adminUnlocked: matched.adminUnlocked,
+    principalUnlocked: matched.principalUnlocked,
+    canTeacherUpload: canUpload,
+    inspectionDate: matched.inspectionDate,
+    notes: matched.notes
+  };
+}
+
+export async function approveAssessmentByPrincipal(assessmentId: string, principalProfile: UserProfile): Promise<void> {
+  const now = new Date().toISOString();
+  if (isSandboxActive()) {
+    const assessments = getSandboxData<Assessment[]>(SANDBOX_ASSESSMENTS_KEY, INITIAL_SANDBOX_ASSESSMENTS);
+    const idx = assessments.findIndex(a => a.id === assessmentId);
+    if (idx !== -1) {
+      assessments[idx] = {
+        ...assessments[idx],
+        workflowStage: 'principal_approved',
+        principalApprovedAt: now,
+        principalApprovedBy: principalProfile.name,
+        status: 'Pending', // Pending admin dispatch
+        updatedAt: now
+      };
+      setSandboxData(SANDBOX_ASSESSMENTS_KEY, assessments);
+      await createActivityLog({
+        assessmentId,
+        action: 'Principal Approved',
+        userId: principalProfile.uid,
+        userName: principalProfile.name,
+        userRole: 'school',
+        comment: `وافق مدير المدرسة (${principalProfile.name}) على إرسال ملف المعلم للوزارة لإسناده للفاحصين.`
+      });
+    }
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, 'assessments', assessmentId), {
+      workflowStage: 'principal_approved',
+      principalApprovedAt: now,
+      principalApprovedBy: principalProfile.name,
+      updatedAt: now
+    });
+    await createActivityLog({
+      assessmentId,
+      action: 'Principal Approved',
+      userId: principalProfile.uid,
+      userName: principalProfile.name,
+      userRole: 'school',
+      comment: `وافق مدير المدرسة (${principalProfile.name}) على إرسال الملف للوزارة.`
+    });
+  } catch (error) {
+    console.error('Error approving assessment by principal:', error);
+  }
+}
+
+export async function dispatchAssessmentToExaminer(
+  assessmentId: string, 
+  examinerId: string, 
+  examinerName: string, 
+  adminProfile: UserProfile
+): Promise<void> {
+  const now = new Date().toISOString();
+  if (isSandboxActive()) {
+    const assessments = getSandboxData<Assessment[]>(SANDBOX_ASSESSMENTS_KEY, INITIAL_SANDBOX_ASSESSMENTS);
+    const idx = assessments.findIndex(a => a.id === assessmentId);
+    if (idx !== -1) {
+      assessments[idx] = {
+        ...assessments[idx],
+        workflowStage: 'admin_dispatched',
+        moderatorId: examinerId,
+        moderatorName: examinerName,
+        adminDispatchedAt: now,
+        adminDispatchedBy: adminProfile.name,
+        status: 'In Progress', // Active in examiner queue
+        updatedAt: now
+      };
+      setSandboxData(SANDBOX_ASSESSMENTS_KEY, assessments);
+      await createActivityLog({
+        assessmentId,
+        action: 'Admin Dispatched',
+        userId: adminProfile.uid,
+        userName: adminProfile.name,
+        userRole: 'admin',
+        comment: `قام مدير النظام بتحويل واستلام الملف وإسناده للفاحص المعتمد: ${examinerName}`
+      });
+    }
+    return;
+  }
+
+  try {
+    await updateDoc(doc(db, 'assessments', assessmentId), {
+      workflowStage: 'admin_dispatched',
+      moderatorId: examinerId,
+      moderatorName: examinerName,
+      adminDispatchedAt: now,
+      adminDispatchedBy: adminProfile.name,
+      status: 'In Progress',
+      updatedAt: now
+    });
+    await createActivityLog({
+      assessmentId,
+      action: 'Admin Dispatched',
+      userId: adminProfile.uid,
+      userName: adminProfile.name,
+      userRole: 'admin',
+      comment: `قام مدير النظام بإسناد وتحويل الملف للفاحص المعتمد: ${examinerName}`
+    });
+  } catch (error) {
+    console.error('Error dispatching assessment to examiner:', error);
   }
 }
 

@@ -18,83 +18,110 @@ export function OverviewStats({
   onStatusClick,
   userRoleType
 }: OverviewStatsProps) {
-  const pending = assessments.filter((a) => a.status === 'Pending').length;
-  const progress = assessments.filter((a) => a.status === 'In Progress').length;
+  const totalForms = assessments.length;
+  const totalSamples = totalForms * 6; // 6 student samples per audit form
   const approved = assessments.filter((a) => a.status === 'Approved').length;
-  const revisions = assessments.filter((a) => a.status === 'Revision Request').length;
   const gradeRevisions = assessments.filter((a) => a.status === 'Grade Revision').length;
+  const revisionRequests = assessments.filter((a) => a.status === 'Revision Request').length;
+  // Forms with grade revisions are a subset of non-conforming forms
+  const nonConforming = revisionRequests + gradeRevisions;
+  const conformanceRate = totalForms > 0 ? Math.round((approved / totalForms) * 100) : 100;
 
   const currentLabels = {
     en: {
-      units: 'Files',
-      progress: 'Under Audit',
+      totalForms: 'Total Forms',
+      totalSamples: 'Audited Samples',
       approved: 'Conforming Forms',
-      revisions: 'Non-compliant',
-      gradeRevisions: 'Grade Revisions',
-      pending: 'Pending Inspection',
+      revisions: 'Non-Conforming Forms',
+      gradeRevisions: 'Grade Revisions (G12)',
+      subsetNote: '(Subset of Non-Conforming)',
+      samplesNote: '6 samples / form',
+      formsUnit: 'Forms',
+      samplesUnit: 'Samples',
+      conformanceRateLabel: 'Specification Conformance Rate',
     },
     ar: {
-      units: 'ملفات',
-      progress: 'تحت التدقيق',
+      totalForms: 'عدد الاستمارات الجملية',
+      totalSamples: 'عدد العينات للفحص',
       approved: 'استمارات مطابقة',
       revisions: 'استمارات غير مطابقة',
-      gradeRevisions: 'تعديل درجات',
-      pending: 'في انتظار الفحص',
+      gradeRevisions: 'تعديل درجات (صف 12)',
+      subsetNote: '(جزء من الاستمارات غير المطابقة)',
+      samplesNote: '6 عينات لكل استمارة',
+      formsUnit: 'استمارة',
+      samplesUnit: 'عينة طالب',
+      conformanceRateLabel: 'نسبة المطابقة للمواصفات',
     }
   }[language] || {
-    units: 'Files',
-    progress: 'Under Audit',
+    totalForms: 'Total Forms',
+    totalSamples: 'Audited Samples',
     approved: 'Conforming Forms',
-    revisions: 'Non-compliant',
-    gradeRevisions: 'Grade Revisions',
-    pending: 'Pending Inspection',
+    revisions: 'Non-Conforming Forms',
+    gradeRevisions: 'Grade Revisions (G12)',
+    subsetNote: '(Subset of Non-Conforming)',
+    samplesNote: '6 samples / form',
+    formsUnit: 'Forms',
+    samplesUnit: 'Samples',
+    conformanceRateLabel: 'Specification Conformance Rate',
   };
 
   const statCards = [
     {
-      status: 'In Progress' as AssessmentStatus,
-      label: currentLabels.progress,
-      count: progress,
+      status: '' as AssessmentStatus,
+      label: currentLabels.totalForms,
+      count: totalForms,
+      subtext: language === 'ar' ? 'لكل المدارس والمراكز' : 'All schools & centres',
       icon: ClipboardList,
+      iconBg: 'bg-slate-100 text-slate-700',
+      activeClass: 'border-slate-600 ring-2 ring-slate-500/20 bg-slate-50',
+      dotColor: 'bg-slate-600',
+      unit: currentLabels.formsUnit,
+    },
+    {
+      status: 'In Progress' as AssessmentStatus,
+      label: currentLabels.totalSamples,
+      count: totalSamples,
+      subtext: currentLabels.samplesNote,
+      icon: Clock,
       iconBg: 'bg-blue-50 text-blue-700',
       activeClass: 'border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/30',
       dotColor: 'bg-blue-500',
+      unit: currentLabels.samplesUnit,
     },
     {
       status: 'Approved' as AssessmentStatus,
       label: currentLabels.approved,
       count: approved,
+      subtext: language === 'ar' ? `نسبة المطابقة للمواصفات: ${conformanceRate}%` : `Conformance Rate: ${conformanceRate}%`,
       icon: CheckCircle2,
       iconBg: 'bg-emerald-50 text-emerald-700',
       activeClass: 'border-emerald-600 ring-2 ring-emerald-500/20 bg-emerald-50/30',
       dotColor: 'bg-emerald-500',
+      unit: currentLabels.formsUnit,
+      ratePct: conformanceRate,
     },
     {
       status: 'Revision Request' as AssessmentStatus,
       label: currentLabels.revisions,
-      count: revisions,
+      count: nonConforming,
+      subtext: language === 'ar' ? `تشمل ${gradeRevisions} تعديل درجات` : `Includes ${gradeRevisions} grade rev.`,
       icon: RotateCw,
       iconBg: 'bg-rose-50 text-rose-700',
       activeClass: 'border-rose-600 ring-2 ring-rose-500/20 bg-rose-50/30',
       dotColor: 'bg-rose-500',
+      unit: currentLabels.formsUnit,
     },
     {
       status: 'Grade Revision' as AssessmentStatus,
       label: currentLabels.gradeRevisions,
       count: gradeRevisions,
+      subtext: currentLabels.subsetNote,
       icon: Percent,
       iconBg: 'bg-indigo-50 text-indigo-700',
       activeClass: 'border-indigo-600 ring-2 ring-indigo-500/20 bg-indigo-50/30',
       dotColor: 'bg-indigo-500',
-    },
-    {
-      status: 'Pending' as AssessmentStatus,
-      label: currentLabels.pending,
-      count: pending,
-      icon: Clock,
-      iconBg: 'bg-amber-50 text-amber-700',
-      activeClass: 'border-amber-600 ring-2 ring-amber-500/20 bg-amber-50/30',
-      dotColor: 'bg-amber-500',
+      unit: currentLabels.formsUnit,
+      badgeText: currentLabels.subsetNote,
     },
   ];
 
@@ -143,13 +170,32 @@ export function OverviewStats({
                 <span className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight leading-none font-sans">
                   {card.count}
                 </span>
-                <span className="text-[10px] font-medium text-slate-400">
-                  {currentLabels.units}
+                <span className="text-[10px] font-bold text-slate-400">
+                  {card.unit || currentLabels.formsUnit}
                 </span>
               </div>
-              <h4 className="text-xs sm:text-xs font-bold text-slate-700 leading-snug">
+              <h4 className="text-xs sm:text-xs font-bold text-slate-800 leading-snug">
                 {card.label}
               </h4>
+              {card.subtext && (
+                <p className={`text-[10px] font-medium leading-tight mt-0.5 ${
+                  card.ratePct !== undefined 
+                    ? 'text-emerald-700 font-bold bg-emerald-50/90 px-1.5 py-0.5 rounded inline-block'
+                    : card.badgeText 
+                    ? 'text-indigo-700 font-bold bg-indigo-50/80 px-1.5 py-0.5 rounded' 
+                    : 'text-slate-400'
+                }`}>
+                  {card.subtext}
+                </p>
+              )}
+              {card.ratePct !== undefined && (
+                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mt-1.5">
+                  <div 
+                    className="bg-emerald-500 h-full transition-all duration-500" 
+                    style={{ width: `${card.ratePct}%` }}
+                  />
+                </div>
+              )}
             </div>
           </button>
         );

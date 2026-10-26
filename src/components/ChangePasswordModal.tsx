@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { Lock, Key, Eye, EyeOff, ShieldCheck, ShieldAlert, X, CheckCircle } from 'lucide-react';
+import { Lock, Key, Eye, EyeOff, ShieldCheck, ShieldAlert, X, CheckCircle, Sparkles, Copy, Check } from 'lucide-react';
+import { generateStrongPassword } from './UserDatabaseView';
 
 interface ChangePasswordModalProps {
   isOpen: boolean;
@@ -240,9 +241,26 @@ export default function ChangePasswordModal({
 
             {/* New Password */}
             <div className="space-y-1.5">
-              <label className="text-[11px] font-extrabold text-slate-700 block font-sans">
-                {language === 'ar' ? 'كلمة المرور الجديدة (6 أحرف على الأقل):' : 'New Password (min 6 characters):'}
-              </label>
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-extrabold text-slate-700 block font-sans">
+                  {language === 'ar' ? 'كلمة المرور الجديدة (6 أحرف على الأقل):' : 'New Password (min 6 characters):'}
+                </label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const pass = generateStrongPassword();
+                    setNewPassword(pass);
+                    setConfirmPassword(pass);
+                    setShowNewPassword(true);
+                    setShowConfirmPassword(true);
+                  }}
+                  className="text-[10px] font-black text-emerald-700 hover:text-emerald-900 flex items-center gap-1 cursor-pointer transition-colors p-0.5"
+                  title={language === 'ar' ? 'توليد كلمة مرور قوية وتلقائية' : 'Generate strong password'}
+                >
+                  <Sparkles className="w-3 h-3 text-amber-500" />
+                  <span>{language === 'ar' ? 'توليد كلمة مرور قوية' : 'Generate Strong Password'}</span>
+                </button>
+              </div>
 
               <div className="relative">
                 <input

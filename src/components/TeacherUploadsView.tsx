@@ -16,6 +16,7 @@ import {
 import { UserProfile, Assessment } from '../types';
 import { Language, translateGrade, translateSubject } from '../lib/translations';
 import { sortItemsByRole } from '../lib/sorting';
+import { getSchoolUploadPermissionStatus } from '../services/db';
 
 interface TeacherUploadsViewProps {
   userProfile: UserProfile;
@@ -238,6 +239,15 @@ export function TeacherUploadsView({
   };
 
   const handleUploadSlot = async (slotId: string) => {
+    if (uploadPermission && !uploadPermission.canTeacherUpload) {
+      onError(
+        language === 'ar'
+          ? 'عذراً، صلاحية رفع الملفات مغلقة لمدرستك. يجب أولاً تفعيل الصلاحية من مدير النظام ثم مدير المدرسة وفق خطة الفحص.'
+          : 'Upload permission is currently locked for your school.'
+      );
+      return;
+    }
+
     if (!selectedGrade) {
       onError(language === 'ar' ? 'يرجى اختيار الصف الدراسي.' : 'Please choose a grade level.');
       return;
@@ -264,7 +274,7 @@ export function TeacherUploadsView({
         type: docTypeClean,
         grade: selectedGrade,
         subject: finalSubject,
-        description: slot.description.trim() || (language === 'ar' ? 'ملف تقييم مستمر مرفوع مسبقاً.' : 'Continuous assessment PDF uploaded by teacher.'),
+        description: slot.description.trim() || (language === 'ar' ? 'ملف تقييم مستمر مرفوع بواسطة المعلم.' : 'Continuous assessment PDF uploaded by teacher.'),
         questions: language === 'ar' 
           ? `[ملف PDF مرفق]\nاسم الملف: ${slot.pdfFile.name}\nتم الرفع كملف PDF تفاعلي.`
           : `[Associated PDF Document]\nFilename: ${slot.pdfFile.name}\nUploaded as an interactive PDF module.`,
@@ -274,7 +284,8 @@ export function TeacherUploadsView({
         isPdf: true,
         pdfName: slot.pdfFile.name,
         pdfSize: formatBytes(slot.pdfFile.size),
-        pdfData: slot.base64
+        pdfData: slot.base64,
+        workflowStage: 'teacher_submitted' as const
       };
 
       await onUploadAssessment(payload);
@@ -291,6 +302,23 @@ export function TeacherUploadsView({
       setLoadingSlotId(null);
     }
   };
+
+  const [uploadPermission, setUploadPermission] = useState<{
+    adminUnlocked: boolean;
+    principalUnlocked: boolean;
+    canTeacherUpload: boolean;
+    inspectionDate: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    async function checkPerm() {
+      if (userProfile.schoolName) {
+        const perm = await getSchoolUploadPermissionStatus(userProfile.schoolName);
+        setUploadPermission(perm);
+      }
+    }
+    checkPerm();
+  }, [userProfile.schoolName]);
 
   return (
     <div className="bg-white rounded-2xl sm:rounded-3xl p-3.5 sm:p-6 border border-slate-200 shadow-md space-y-4 sm:space-y-6" id="teacher-upload-hub">
@@ -314,6 +342,39 @@ export function TeacherUploadsView({
           {new Date().toLocaleDateString(language === 'ar' ? 'ar-OM' : 'en-US', { day: 'numeric', month: 'long', year: 'numeric' })}
         </div>
       </div>
+
+      {/* STEP 2 PERMISSION LOCK WARNING BANNER */}
+      {uploadPermission && !uploadPermission.canTeacherUpload && (
+        <div className="bg-amber-50 border border-amber-300/80 rounded-2xl p-4 space-y-2 text-right">
+          <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+            <LockKeyhole className="w-4 h-4 text-amber-600 shrink-0" />
+            <span>{language === 'ar' ? `صلاحية رفع الملفات مغلقة حالياً لمدرستك (${userProfile.schoolName || 'المدرسة'})` : 'Upload Permission Currently Locked'}</span>
+          </div>
+          <p className="text-[11px] text-amber-800 leading-relaxed font-medium">
+            {language === 'ar' 
+              ? `تتطلب سلسلة رفع الملفات تفعيل الصلاحية خطوة بخطوة وفق خطة الفحص الوزارية:`
+              : `Upload workflow follows a strict step-by-step unlock schedule:`}
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[10.5px] pt-1">
+            <div className="bg-white/80 p-2 rounded-xl border border-amber-200">
+              <span className="font-bold block text-slate-800">1. موعد الفحص المجدول:</span>
+              <span className="text-indigo-700 font-mono font-extrabold">{uploadPermission.inspectionDate}</span>
+            </div>
+            <div className="bg-white/80 p-2 rounded-xl border border-amber-200">
+              <span className="font-bold block text-slate-800">2. موافقة مدير النظام:</span>
+              <span className={uploadPermission.adminUnlocked ? 'text-emerald-700 font-bold' : 'text-rose-600 font-bold'}>
+                {uploadPermission.adminUnlocked ? '✓ تم الفتح من الوزارة' : '🔴 بانتظار فتح مدير النظام'}
+              </span>
+            </div>
+            <div className="bg-white/80 p-2 rounded-xl border border-amber-200">
+              <span className="font-bold block text-slate-800">3. موافقة مدير المدرسة:</span>
+              <span className={uploadPermission.principalUnlocked ? 'text-emerald-700 font-bold' : 'text-rose-600 font-bold'}>
+                {uploadPermission.principalUnlocked ? '✓ تم التفعيل للمعلمين' : '🔴 بانتظار تفعيل مدير المدرسة'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* STEP 1: Grade Selection */}
       <div className="space-y-2 bg-[#FAF9F5] p-4 rounded-2xl border border-slate-250/20">

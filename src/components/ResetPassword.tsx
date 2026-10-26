@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { auth } from '../services/firebase';
 import { confirmPasswordReset, verifyPasswordResetCode } from 'firebase/auth';
-import { ShieldCheck, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
+import { ShieldCheck, ArrowRight, Loader2, AlertCircle, Sparkles } from 'lucide-react';
+import { generateStrongPassword } from './UserDatabaseView';
 
 export const ResetPassword = () => {
   const [newPassword, setNewPassword] = useState('');
@@ -120,9 +121,24 @@ export const ResetPassword = () => {
             {!success && (
               <form onSubmit={handleUpdatePassword} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-semibold text-slate-700 mb-1">
-                    New Password
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-semibold text-slate-700">
+                      New Password
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const pass = generateStrongPassword();
+                        setNewPassword(pass);
+                        setConfirmPassword(pass);
+                      }}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 cursor-pointer transition-colors"
+                      title="Generate strong random password"
+                    >
+                      <Sparkles className="w-3 h-3 text-amber-500" />
+                      <span>Generate Strong Password</span>
+                    </button>
+                  </div>
                   <input
                     type="password"
                     required
