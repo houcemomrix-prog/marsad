@@ -136,6 +136,24 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["titleAr", "schoolId", "schoolName", "pdfData", "senderId"]
+    },
+    "InspectionPlan": {
+      "title": "InspectionPlan",
+      "description": "Ministry inspection and upload permission schedule for schools",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string", "description": "Target school identifier" },
+        "schoolName": { "type": "string", "description": "Name of the school" },
+        "inspectionDate": { "type": "string", "description": "Scheduled inspection date" },
+        "adminUnlocked": { "type": "boolean", "description": "Master permission from system administrator" },
+        "principalUnlocked": { "type": "boolean", "description": "School principal permission for teachers (automatically locked if admin locks)" },
+        "adminUnlockedAt": { "type": "string", "format": "date-time" },
+        "principalUnlockedAt": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolName", "inspectionDate", "adminUnlocked", "principalUnlocked"]
     }
   },
   "firestore": {
@@ -162,6 +180,10 @@
     "school_reports/{reportId}": {
       "schema": "SchoolReport",
       "description": "Reports dispatched securely by Ministry Admins to specific schools"
+    },
+    "inspection_plans/{planId}": {
+      "schema": "InspectionPlan",
+      "description": "Inspection plans and multi-tier upload permissions for schools"
     }
   }
 }

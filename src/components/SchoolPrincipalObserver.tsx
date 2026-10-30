@@ -94,6 +94,8 @@ export function SchoolPrincipalObserver({
   const [nudgedTeacherIds, setNudgedTeacherIds] = useState<Record<string, boolean>>({});
   const [subjectFilter, setSubjectFilter] = useState<string>('');
   const [statusFilter, setStatusFilter] = useState<string>('');
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
+  const [approveLoading, setApproveLoading] = useState<boolean>(false);
 
   const principalSchool = userProfile.schoolName || 'مدرسة الدقم للتعليم الأساسي';
 
@@ -227,6 +229,63 @@ export function SchoolPrincipalObserver({
         ? `تم إرسال تنبيه متابعة وتدقيق تربوي بنجاح إلى ${teacherName} لمتابعة مرفوعات مادة ${translateSubject(subject, 'ar')}.`
         : `Supportive syllabus upload reminder successfully dispatched to ${teacherName} regarding ${translateSubject(subject, 'en')} curriculum schedule.`;
       onSuccess(msg);
+    };
+
+    const handleToggleSelectDoc = (docId: string) => {
+      setSelectedDocIds(prev => 
+        prev.includes(docId) ? prev.filter(id => id !== docId) : [...prev, docId]
+      );
+    };
+
+    const handleSelectAllDocs = (docs: Assessment[]) => {
+      const docIds = docs.map(d => d.id);
+      const allSelected = docIds.length > 0 && docIds.every(id => selectedDocIds.includes(id));
+      if (allSelected) {
+        setSelectedDocIds(prev => prev.filter(id => !docIds.includes(id)));
+      } else {
+        setSelectedDocIds(prev => Array.from(new Set([...prev, ...docIds])));
+      }
+    };
+
+    const handleBulkApproveDocs = async (targetDocIds?: string[]) => {
+      const ids = targetDocIds || selectedDocIds;
+      if (ids.length === 0) {
+        if (onError) onError(language === 'ar' ? 'الرجاء اختيار ملف واحد على الأقل للاعتماد.' : 'Please select at least one document to approve.');
+        return;
+      }
+
+      setApproveLoading(true);
+      try {
+        await Promise.all(
+          ids.map(id => approveAssessmentByPrincipal(id, userProfile))
+        );
+        onSuccess(
+          language === 'ar'
+            ? `تم اعتماد عدد (${ids.length}) ملفات بنجاح من قِبل مدير المدرسة وتأكيدها في البوابة.`
+            : `Successfully bulk approved (${ids.length}) file(s) by Principal.`
+        );
+        setSelectedDocIds(prev => prev.filter(id => !ids.includes(id)));
+      } catch (err: any) {
+        if (onError) onError(err.message || 'Error bulk approving documents');
+      } finally {
+        setApproveLoading(false);
+      }
+    };
+
+    const handleSingleApproveDoc = async (docId: string, title: string) => {
+      setApproveLoading(true);
+      try {
+        await approveAssessmentByPrincipal(docId, userProfile);
+        onSuccess(
+          language === 'ar'
+            ? `تم اعتماد الملف (${title}) بنجاح من قِبل مدير المدرسة.`
+            : `Document (${title}) approved by Principal.`
+        );
+      } catch (err: any) {
+        if (onError) onError(err.message || 'Error approving document');
+      } finally {
+        setApproveLoading(false);
+      }
     };
 
     // Calculate aggregated school stats
@@ -565,10 +624,10 @@ export function SchoolPrincipalObserver({
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="px-2.5 py-1.5 border border-slate-200 rounded-lg text-xs text-slate-650 bg-slate-50 cursor-pointer font-medium focus:outline-none focus:border-indigo-500"
                 >
-                  <option key="filter-status-all" value="">{language === 'ar' ? 'جميع الحالات' : 'All Compliance'}</option>
-                  <option key="filter-status-completed" value="completed">{language === 'ar' ? 'مستوفي النصاب (مكتمل)' : 'Fully Compliant'}</option>
-                  <option key="filter-status-partial" value="partial">{language === 'ar' ? 'جزئي (مرفوعات ناقصة)' : 'Partial Uploads'}</option>
-                  <option key="filter-status-none" value="none">{language === 'ar' ? 'متأخر (لم يرفع ملفات)' : 'No Submissions'}</option>
+                  <option key="filter-status-all" value="">{language === 'ar' ? 'جميع الحالات' : 'All Status'}</option>
+                  <option key="filter-status-completed" value="completed">{language === 'ar' ? 'تم الرفع' : 'Uploaded'}</option>
+                  <option key="filter-status-partial" value="partial">{language === 'ar' ? 'تم الرفع (جزئي)' : 'Partially Uploaded'}</option>
+                  <option key="filter-status-none" value="none">{language === 'ar' ? 'لم يتم الرفع' : 'Not Uploaded'}</option>
                 </select>
               </div>
             </div>
@@ -597,7 +656,7 @@ export function SchoolPrincipalObserver({
                   <th className="py-4.5 px-6">{language === 'ar' ? 'المعلم والبريد الإلكتروني' : 'Teacher & Email'}</th>
                   <th className="py-4.5 px-4">{language === 'ar' ? 'التخصص والمادة' : 'Subject Field'}</th>
                   <th className="py-4.5 px-4">{language === 'ar' ? 'الملفات المرفوعة' : 'Blueprints Uploaded'}</th>
-                  <th className="py-4.5 px-4">{language === 'ar' ? 'مطابقة الخطة والمستندات' : 'Syllabus Tracking'}</th>
+                  <th className="py-4.5 px-4">{language === 'ar' ? 'حالة الرفع' : 'Upload Status'}</th>
                   <th className="py-4.5 px-6 text-right">{language === 'ar' ? 'الإجراء الإداري والمتابعة' : 'Observation Management'}</th>
                 </tr>
               </thead>
@@ -624,15 +683,12 @@ export function SchoolPrincipalObserver({
                     // Visual badge style for compliance status
                     let statusLabel = '';
                     let statusColor = '';
-                    if (complianceStatus === 'completed') {
-                      statusLabel = language === 'ar' ? 'مستوفي النصاب (🟢)' : 'Fully Compliant';
-                      statusColor = 'bg-emerald-50 text-emerald-700 border border-emerald-150 font-bold';
-                    } else if (complianceStatus === 'partial') {
-                      statusLabel = language === 'ar' ? 'مرفوع جزئي (🟡)' : 'Partial Uploads';
-                      statusColor = 'bg-amber-50 text-amber-700 border border-amber-150 font-bold';
+                    if (complianceStatus === 'completed' || uploads.length > 0) {
+                      statusLabel = language === 'ar' ? 'تم الرفع' : 'Uploaded';
+                      statusColor = 'bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold';
                     } else {
-                      statusLabel = language === 'ar' ? 'لم يرفع بعد (🔴)' : 'Pending Submissions';
-                      statusColor = 'bg-rose-50 text-rose-700 border border-rose-150 font-bold';
+                      statusLabel = language === 'ar' ? 'لم يتم الرفع' : 'Not Uploaded';
+                      statusColor = 'bg-rose-50 text-rose-700 border border-rose-200 font-bold';
                     }
 
                     return (
@@ -735,14 +791,49 @@ export function SchoolPrincipalObserver({
                             <td colSpan={5} className="py-4 px-6 border-b border-indigo-100/30">
                               <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/50 space-y-4 animate-in slide-in-from-top-1 duration-150">
                                 
-                                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                                  <h6 className="font-heading font-black text-[#051C3F] text-[11px] uppercase tracking-wider flex items-center gap-1.5">
-                                    <BookOpen className="w-4 h-4 text-indigo-600" />
-                                    {language === 'ar' ? `المرفوعات والامتحانات التعليمية لـ ${profile.name}` : `Assessment Blueprints Uploaded by ${profile.name}`}
-                                  </h6>
-                                  <span className="text-[10px] font-semibold text-slate-400">
-                                    {uploads.length} {language === 'ar' ? 'أوراق تقييم مسجلة' : 'papers registered'}
-                                  </span>
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-2.5 gap-2">
+                                  <div className="flex items-center gap-2">
+                                    <h6 className="font-heading font-black text-[#051C3F] text-[11px] uppercase tracking-wider flex items-center gap-1.5">
+                                      <BookOpen className="w-4 h-4 text-indigo-600" />
+                                      {language === 'ar' ? `المرفوعات والامتحانات التعليمية لـ ${profile.name}` : `Assessment Blueprints Uploaded by ${profile.name}`}
+                                    </h6>
+                                    <span className="text-[10px] font-semibold text-slate-400">
+                                      {uploads.length} {language === 'ar' ? 'أوراق تقييم مسجلة' : 'papers registered'}
+                                    </span>
+                                  </div>
+
+                                  {/* Bulk actions for this teacher */}
+                                  {uploads.length > 0 && (
+                                    <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSelectAllDocs(uploads)}
+                                        className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-[10px] font-bold cursor-pointer transition-colors"
+                                      >
+                                        {uploads.every(d => selectedDocIds.includes(d.id))
+                                          ? (language === 'ar' ? 'إلغاء التحديد' : 'Deselect All')
+                                          : (language === 'ar' ? 'تحديد الكل' : 'Select All')}
+                                      </button>
+
+                                      {uploads.some(d => d.workflowStage !== 'principal_approved') && (
+                                        <button
+                                          type="button"
+                                          disabled={approveLoading}
+                                          onClick={() => {
+                                            const unapproved = uploads.filter(d => d.workflowStage !== 'principal_approved').map(d => d.id);
+                                            const targetIds = selectedDocIds.filter(id => uploads.some(u => u.id === id)).length > 0
+                                              ? selectedDocIds.filter(id => uploads.some(u => u.id === id))
+                                              : unapproved;
+                                            handleBulkApproveDocs(targetIds);
+                                          }}
+                                          className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-all shadow-3xs disabled:opacity-50"
+                                        >
+                                          <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                                          <span>{language === 'ar' ? 'اعتماد جماعي للملفات' : 'Bulk Approve Files'}</span>
+                                        </button>
+                                      )}
+                                    </div>
+                                  )}
                                 </div>
 
                                 {uploads.length === 0 ? (
@@ -756,31 +847,56 @@ export function SchoolPrincipalObserver({
                                     {uploads.map((docItem, index) => (
                                       <div 
                                         key={`doc-item-${docItem.id || index}-${index}`}
-                                        className="bg-white p-3 border border-slate-200 rounded-xl hover:border-indigo-400/50 shadow-3xs flex flex-col justify-between gap-3 group transition-colors"
+                                        className={`p-3 border rounded-xl shadow-3xs flex flex-col justify-between gap-3 group transition-colors ${
+                                          selectedDocIds.includes(docItem.id) 
+                                            ? 'bg-emerald-50/70 border-emerald-400 ring-1 ring-emerald-400/30' 
+                                            : 'bg-white border-slate-200 hover:border-indigo-400/50'
+                                        }`}
                                       >
                                         <div className="flex items-start justify-between gap-1.5">
-                                          <div className="space-y-0.5">
-                                            <span className="bg-slate-100 text-slate-500 font-extrabold text-[8.5px] px-1.5 py-0.5 rounded uppercase tracking-wider block w-fit">
-                                              {docItem.type === 'test' ? (language === 'ar' ? 'امتحان موحد' : 'Unified Exam') : (language === 'ar' ? 'اختبار قصير' : 'Unit Quiz')}
-                                            </span>
-                                            <h4 className="font-bold text-slate-900 group-hover:text-indigo-650 transition-colors text-xs line-clamp-1 pr-1 font-heading">
-                                              {docItem.title}
-                                            </h4>
-                                            <div className="flex items-center text-[10px] text-slate-400 gap-2 font-semibold">
-                                              <span>{translateGrade(docItem.grade, language)}</span>
-                                              <span>•</span>
-                                              <span>
-                                                {new Date(docItem.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}
+                                          <div className="flex items-start gap-2">
+                                            <input
+                                              type="checkbox"
+                                              checked={selectedDocIds.includes(docItem.id)}
+                                              onChange={() => handleToggleSelectDoc(docItem.id)}
+                                              className="w-4 h-4 mt-0.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer accent-emerald-600 shrink-0"
+                                              title={language === 'ar' ? 'تحديد للاعتماد الجماعي' : 'Select for Bulk Approval'}
+                                            />
+                                            <div className="space-y-0.5">
+                                              <span className="bg-slate-100 text-slate-500 font-extrabold text-[8.5px] px-1.5 py-0.5 rounded uppercase tracking-wider block w-fit">
+                                                {docItem.type === 'test' ? (language === 'ar' ? 'امتحان موحد' : 'Unified Exam') : (language === 'ar' ? 'اختبار قصير' : 'Unit Quiz')}
                                               </span>
+                                              <h4 className="font-bold text-slate-900 group-hover:text-indigo-650 transition-colors text-xs line-clamp-1 pr-1 font-heading">
+                                                {docItem.title}
+                                              </h4>
+                                              <div className="flex items-center text-[10px] text-slate-400 gap-2 font-semibold">
+                                                <span>{translateGrade(docItem.grade, language)}</span>
+                                                <span>•</span>
+                                                <span>
+                                                  {new Date(docItem.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}
+                                                </span>
+                                              </div>
                                             </div>
                                           </div>
 
-                                          <Badge status={docItem.status} language={language} />
+                                          <div className="flex flex-col items-end gap-1">
+                                            <Badge status={docItem.status} language={language} />
+                                            {docItem.workflowStage === 'principal_approved' || docItem.principalApprovedBy ? (
+                                              <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 text-[8.5px] font-black px-1.5 py-0.2 rounded-md flex items-center gap-0.5">
+                                                <CheckCircle2 className="w-2.5 h-2.5 text-emerald-700" />
+                                                {language === 'ar' ? 'معتمد' : 'Approved'}
+                                              </span>
+                                            ) : (
+                                              <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[8.5px] font-bold px-1.5 py-0.2 rounded-md">
+                                                {language === 'ar' ? 'بانتظار الاعتماد' : 'Pending'}
+                                              </span>
+                                            )}
+                                          </div>
                                         </div>
 
                                         {/* Row footer: feedback snapshot and Inspector button */}
-                                        <div className="flex items-center justify-between border-t border-slate-50 pt-2 text-[10.5px]">
-                                          <div className="truncate max-w-[170px] text-slate-450 italic font-medium font-sans">
+                                        <div className="flex items-center justify-between border-t border-slate-50 pt-2 text-[10.5px] gap-2 flex-wrap">
+                                          <div className="truncate max-w-[140px] text-slate-450 italic font-medium font-sans">
                                             {docItem.feedback ? (
                                               <span>💬 {docItem.feedback}</span>
                                             ) : (
@@ -788,15 +904,30 @@ export function SchoolPrincipalObserver({
                                             )}
                                           </div>
                                           
-                                          {/* Inspect Action */}
-                                          <button
-                                            type="button"
-                                            onClick={() => onInspect(docItem)}
-                                            className="px-2.5 py-1 text-indigo-750 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 rounded-lg text-[10px] font-black tracking-normal flex items-center gap-1 cursor-pointer transition-all shrink-0"
-                                          >
-                                            <Eye className="w-3.5 h-3.5 text-indigo-650" />
-                                            <span>{language === 'ar' ? 'تفاصيل المطابقة' : 'Inspect Details'}</span>
-                                          </button>
+                                          <div className="flex items-center gap-1.5 shrink-0">
+                                            {docItem.workflowStage !== 'principal_approved' && !docItem.principalApprovedBy && (
+                                              <button
+                                                type="button"
+                                                disabled={approveLoading}
+                                                onClick={() => handleSingleApproveDoc(docItem.id, docItem.title)}
+                                                className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-lg text-[10px] font-bold flex items-center gap-1 cursor-pointer transition-colors shadow-3xs"
+                                                title={language === 'ar' ? 'اعتماد هذا الملف من مدير المدرسة' : 'Approve by Principal'}
+                                              >
+                                                <CheckCircle2 className="w-3 h-3 text-white" />
+                                                <span>{language === 'ar' ? 'اعتماد' : 'Approve'}</span>
+                                              </button>
+                                            )}
+
+                                            {/* Inspect Action */}
+                                            <button
+                                              type="button"
+                                              onClick={() => onInspect(docItem)}
+                                              className="px-2.5 py-1 text-indigo-750 hover:bg-indigo-50 border border-transparent hover:border-indigo-200 rounded-lg text-[10px] font-black tracking-normal flex items-center gap-1 cursor-pointer transition-all shrink-0"
+                                            >
+                                              <Eye className="w-3.5 h-3.5 text-indigo-650" />
+                                              <span>{language === 'ar' ? 'تفاصيل المطابقة' : 'Inspect Details'}</span>
+                                            </button>
+                                          </div>
                                         </div>
 
                                       </div>

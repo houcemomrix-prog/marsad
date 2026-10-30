@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { School, Sparkles, ClipboardList, ShieldCheck, X, Lock, LogIn, ArrowRight, ShieldAlert, Key, Users, CheckCircle, LayoutDashboard, FileSpreadsheet, BarChart3, CheckSquare, Settings, BookOpen, LogOut, Briefcase, Download, FileText, FileUp, Printer, Scale, QrCode } from 'lucide-react';
+import { School, Sparkles, ClipboardList, ShieldCheck, X, Lock, LogIn, ArrowRight, ShieldAlert, Key, Users, CheckCircle, LayoutDashboard, FileSpreadsheet, BarChart3, CheckSquare, Settings, BookOpen, LogOut, Briefcase, Download, FileText, FileUp, Printer, Scale, QrCode, CheckCheck } from 'lucide-react';
 import { 
   motion, 
   AnimatePresence 
@@ -49,9 +49,14 @@ import {
   getActivityLogs,
   archiveForm,
   getArchivedForms,
+  subscribeToArchivedForms,
   signArchivedForm,
   signArchivedTeacherForm,
   signArchivedExaminerForm,
+  transferArchivedFormToPrincipal,
+  transferArchivedFormToTeacher,
+  markAssessmentReadByExaminer,
+  updateArchivedFormStudents,
   getFormDesignSettings,
   saveFormDesignSettings
 } from './services/db';
@@ -75,6 +80,7 @@ import { DatabasesHubView } from './components/DatabasesHubView';
 import { TeacherUploadsView } from './components/TeacherUploadsView';
 import { SchoolPrincipalObserver, isSameSchool } from './components/SchoolPrincipalObserver';
 import { SchoolArchiveView } from './components/SchoolArchiveView';
+import { FormTrackerView } from './components/FormTrackerView';
 import { FormStyleController } from './components/FormStyleController';
 import { SignatureVerifierView } from './components/SignatureVerifierView';
 import { InspectionPlanManager } from './components/InspectionPlanManager';
@@ -133,6 +139,16 @@ export default function App() {
       if (activeRaw) {
         const parsed = JSON.parse(activeRaw);
         if (parsed && (parsed.email || parsed.uid)) {
+          if (parsed.email === 'moderator@moe.om' || parsed.uid === 'demo-mod-1' || (parsed.name && parsed.name.includes('الحارثي'))) {
+            parsed.role = 'moderator';
+            parsed.jobTitle = 'فاحص ومدقق مادة العلوم العامة';
+            parsed.subject = 'Science';
+          }
+          if (parsed.email === 'school@moe.om' || parsed.uid === 'demo-school-1' || (parsed.jobTitle && parsed.jobTitle.includes('مدير مدرسة')) || (parsed.name && parsed.name.includes('مدير مدرسة'))) {
+            parsed.role = 'school';
+            parsed.roleType = 'administrative';
+            parsed.jobTitle = 'مدير مدرسة';
+          }
           if (isDualRoleAccount(parsed)) {
             if (!parsed.name || parsed.name.includes('خالد العامري')) {
               parsed.name = 'أ. حسام عمري';
@@ -156,15 +172,16 @@ export default function App() {
     return null;
   });
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases'>(() => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases' | 'tracker'>(() => {
     try {
       const saved = localStorage.getItem('oman_moe_active_tab');
-      if (saved && ['overview', 'exams', 'results', 'standards', 'settings', 'archive', 'databases'].includes(saved)) {
+      if (saved && ['overview', 'exams', 'results', 'standards', 'settings', 'archive', 'databases', 'tracker'].includes(saved)) {
         return saved as any;
       }
     } catch {}
     return 'overview';
   });
+  const [trackerSelectedFormId, setTrackerSelectedFormId] = useState<string | null>(null);
 
   const [adminTab, setAdminTab] = useState<'catalog' | 'stats' | 'plan' | 'database' | 'schools' | 'subjects' | 'stamps' | 'signatures' | 'design'>(() => {
     try {
@@ -189,6 +206,16 @@ export default function App() {
   // Preserve user session and active tabs across page refreshes
   useEffect(() => {
     if (userProfile) {
+      if (userProfile.email === 'moderator@moe.om' || userProfile.uid === 'demo-mod-1' || (userProfile.name && userProfile.name.includes('الحارثي'))) {
+        if (userProfile.subject !== 'Science') {
+          setUserProfile(prev => prev ? {
+            ...prev,
+            subject: 'Science',
+            jobTitle: 'فاحص ومدقق مادة العلوم العامة'
+          } : null);
+          return;
+        }
+      }
       localStorage.setItem('oman_moe_active_user', JSON.stringify(userProfile));
     }
   }, [userProfile]);
@@ -209,7 +236,15 @@ export default function App() {
   const [archivedForms, setArchivedForms] = useState<ArchivedForm[]>([]);
   const [archivedAssessmentIds, setArchivedAssessmentIds] = useState<string[]>([]);
   const [selectedApprovedForm, setSelectedApprovedForm] = useState<ArchivedForm | null>(null);
+  const [selectedStudentIndices, setSelectedStudentIndices] = useState<number[]>([]);
+  const [isBulkApprovingStudents, setIsBulkApprovingStudents] = useState<boolean>(false);
   const [formStyles, setFormStyles] = useState<FormDesignSettings | null>(null);
+  const [principalSelectedTeacher, setPrincipalSelectedTeacher] = useState<string | null>(null);
+
+  // Clear student selection when switching approved forms
+  useEffect(() => {
+    setSelectedStudentIndices([]);
+  }, [selectedApprovedForm?.id]);
   const [downloadModalData, setDownloadModalData] = useState<{
     isOpen: boolean;
     blobUrl: string;
@@ -982,9 +1017,93 @@ export default function App() {
     }
   };
 
+  const handleBulkApproveStudents = async () => {
+    if (!selectedApprovedForm) return;
+    const currentStudents = selectedApprovedForm.students || [];
+    if (currentStudents.length === 0) {
+      handleError(language === 'ar' ? 'لا توجد عينات طلاب معروضة للاعتماد.' : 'No student samples to approve.');
+      return;
+    }
+
+    // If no individual rows selected, approve all rows in batch
+    const indicesToApprove = selectedStudentIndices.length > 0 
+      ? selectedStudentIndices 
+      : currentStudents.map((_, i) => i);
+
+    setIsBulkApprovingStudents(true);
+    try {
+      const defaultNotes = selectedApprovedForm.grade === 'Grade 12'
+        ? (language === 'ar' ? 'معتمد ومطابق للمواصفات' : 'Approved & Verified')
+        : (language === 'ar' ? 'مستوفٍ ومطابق للمواصفات' : 'Compliant');
+
+      const updatedStudents = currentStudents.map((st, idx) => {
+        if (indicesToApprove.includes(idx)) {
+          return {
+            ...st,
+            notes: defaultNotes
+          };
+        }
+        return st;
+      });
+
+      const updatedForm: ArchivedForm = {
+        ...selectedApprovedForm,
+        students: updatedStudents
+      };
+
+      // Immediate UI state reflection
+      setSelectedApprovedForm(updatedForm);
+      setArchivedForms(prev => prev.map(f => f.id === updatedForm.id ? updatedForm : f));
+
+      // Persist changes to database / sandbox
+      await updateArchivedFormStudents(selectedApprovedForm.id, updatedStudents);
+
+      // Reset selection
+      setSelectedStudentIndices([]);
+
+      handleSuccess(
+        language === 'ar'
+          ? `تم اعتماد عدد ${indicesToApprove.length} من عينات الطلاب بنجاح!`
+          : `Successfully approved ${indicesToApprove.length} student samples!`
+      );
+    } catch (err: any) {
+      console.error('Failed to bulk approve students:', err);
+      handleError(
+        language === 'ar'
+          ? `تعذر اعتماد عينات الطلاب (${err?.message || 'خطأ في المعالجة'}).`
+          : `Failed to bulk approve student samples: ${err?.message || 'Processing error'}`
+      );
+    } finally {
+      setIsBulkApprovingStudents(false);
+    }
+  };
+
+  const getExistingTeacherForm = (tName?: string): ArchivedForm | undefined => {
+    const cleanTarget = formatCleanTeacherName(tName || '').toLowerCase();
+    if (!cleanTarget) return undefined;
+    return archivedForms.find((f) => {
+      const cleanFormTeacher = formatCleanTeacherName(f.teacherName || '').toLowerCase();
+      return Boolean(cleanFormTeacher && (cleanFormTeacher === cleanTarget || cleanFormTeacher.includes(cleanTarget) || cleanTarget.includes(cleanFormTeacher)));
+    });
+  };
+
   const handleArchiveForm = async () => {
     if (!userProfile) {
       handleError(language === 'ar' ? 'يجب تسجيل الدخول للقيام بالأرشفة.' : 'Please log in to archive forms.');
+      return;
+    }
+    if (userProfile.role !== 'moderator') {
+      handleError(language === 'ar' ? 'عذراً، إعداد وتوقيع الاستمارة مخصص لمدقق الفحص الفني فقط.' : 'Form preparation & signing restricted to Moderator account.');
+      return;
+    }
+    const existingTeacherForm = getExistingTeacherForm(auditTeacherName);
+    if (existingTeacherForm) {
+      handleError(
+        language === 'ar'
+          ? `تم إعداد وتوقيع استمارة مسبقة للمعلم (أ. ${formatCleanTeacherName(auditTeacherName)}). يُسمح للمدقق بعمل استمارة واحدة فقط لكل معلم.`
+          : `An audit form has already been created for teacher (${formatCleanTeacherName(auditTeacherName)}). Only one form per teacher is allowed.`
+      );
+      setSelectedApprovedForm(existingTeacherForm);
       return;
     }
     if (!auditConformanceStatus) {
@@ -1048,7 +1167,8 @@ export default function App() {
         principalName: auditPrincipalName,
         students: mappedStudents,
         observations: mappedObservations,
-        // Step 1: Prepared and signed by the Auditor
+        // Step 1: Prepared and signed by the Auditor and transferred to System Admin for review
+        workflowStage: 'examiner_submitted_to_admin',
         isExaminerSigned: true,
         examinerSignedAt: nowIso,
         examinerSignedName: auditExaminerName || userProfile.name || 'أ. مشرف المادة المعين',
@@ -1056,9 +1176,7 @@ export default function App() {
         examinerSignatureStampUrl: 'Examiner verified electronically',
         conformanceStatus: auditConformanceStatus || 'conforming',
         hasGradeRevisions: false,
-        // Step 2: Forwarded to Teacher (Pending Teacher signature)
         isTeacherSigned: false,
-        // Step 3: Pending Principal signature and official stamp
         isSigned: false
       });
 
@@ -1067,8 +1185,8 @@ export default function App() {
           setArchivedAssessmentIds(prev => [...prev, assessmentId]);
         }
         handleSuccess(language === 'ar' 
-          ? `✓ تم تجهيز وتوقيع الاستمارة من قِبل المدقق بنجاح! وتم إرسالها الآن للمرحلة (2) لتوقيع المعلم (${auditTeacherName || 'المعلم المعني'})، تمهيداً لإرسالها لمدير المدرسة للاعتماد والختم (المرحلة 3).` 
-          : 'Phase 1 Complete: Form prepared & signed by Auditor and forwarded to Teacher (Phase 2) prior to Principal certification & stamp (Phase 3).');
+          ? `✓ تم تجهيز وتوقيع الاستمارة الوحيدة المعتمدة للمعلم (أ. ${formatCleanTeacherName(auditTeacherName)}) من قِبل المدقق أ. ${auditExaminerName || userProfile.name} بنجاح! وتم تحويلها لمدير النظام للاطلاع.` 
+          : 'Stage 1 Complete: Single teacher form signed by Auditor and routed to System Admin for review.');
         await fetchArchivedFormsList();
       } else {
         handleError(language === 'ar' ? 'فشلت عملية أرشفة الاستمارة.' : 'Failed archiving the form snapshot.');
@@ -1082,6 +1200,17 @@ export default function App() {
   };
 
   const handleStartAuditFormFromChat = (tName: string, schName: string, subjName: string, targetAss: Assessment | null) => {
+    const existingTeacherForm = getExistingTeacherForm(tName);
+    if (existingTeacherForm) {
+      setSelectedApprovedForm(existingTeacherForm);
+      handleError(
+        language === 'ar'
+          ? `يوجد بالفعل استمارة معتمدة للمعلم (أ. ${formatCleanTeacherName(tName)}). يُسمح للمدقق بعمل استمارة واحدة فقط لكل معلم.`
+          : `An audit form already exists for teacher (${formatCleanTeacherName(tName)}). Only one form per teacher is allowed.`
+      );
+      return;
+    }
+
     setAuditTeacherName(tName);
     setAuditSchool(schName);
     if (subjName) setAuditSubjectName(subjName);
@@ -1089,6 +1218,23 @@ export default function App() {
     
     if (targetAss) {
       setCurrentAssessment(targetAss);
+    } else {
+      const nowIso = new Date().toISOString();
+      setCurrentAssessment({
+        id: 'teacher_form_' + Math.random().toString(36).substr(2, 9),
+        title: `ملف التقويم المستمر - أ. ${formatCleanTeacherName(tName)}`,
+        type: 'continuous',
+        subject: subjName || auditSubjectName || 'اللغة الإنجليزية',
+        grade: 'الصفوف (5-12)',
+        teacherId: 'teacher_' + formatCleanTeacherName(tName),
+        teacherName: tName,
+        schoolId: 'school_wusta',
+        schoolName: schName,
+        status: 'pending',
+        content: 'ملف عينات وأدوات التقويم المستمر للمعلم',
+        createdAt: nowIso,
+        updatedAt: nowIso
+      });
     }
     
     setReviewFeedback(
@@ -1099,8 +1245,8 @@ export default function App() {
 
     handleSuccess(
       language === 'ar'
-        ? `تم فتح استمارة التدقيق المعتمدة للمعلم (${tName}). يمكنك الآن مراجعة المفردات وتحديد حالة المطابقة والاعتماد.`
-        : `Audit form opened for teacher (${tName}). You can now inspect samples and complete accreditation.`
+        ? `تم فتح استمارة التدقيق المعتمدة للمعلم (${tName}). يُسمح للمدقق بعمل استمارة واحدة فقط لكل معلم.`
+        : `Audit form opened for teacher (${tName}). Only one form per teacher is allowed.`
     );
 
     setTimeout(() => {
@@ -1474,14 +1620,18 @@ export default function App() {
       fetchAssessmentList();
       fetchArchivedFormsList();
       if (userProfile.role === 'moderator') {
-        const auditorSubject = (userProfile.subject && !isUniversalSubject(userProfile.subject)) ? userProfile.subject : 'Mathematics';
+        const auditorSubject = (userProfile.subject && !isUniversalSubject(userProfile.subject)) ? userProfile.subject : 'Science';
         setSelectedSubject(auditorSubject);
         setFormSubject(auditorSubject);
         if (!selectedModeratorSchool) {
           setSelectedModeratorSchool('مدرسة الدقم للتعليم الأساسي');
         }
-        if (!selectedModeratorTeacher) {
+        if (auditorSubject === 'Science' || isSubjectMatch(auditorSubject, 'Science')) {
           setSelectedModeratorTeacher('د. فاطمة السيابية');
+        } else if (auditorSubject === 'Mathematics' || isSubjectMatch(auditorSubject, 'Mathematics')) {
+          setSelectedModeratorTeacher('أ. منى بنت عبدالله الوهيبية');
+        } else {
+          setSelectedModeratorTeacher(null);
         }
       } else if (userProfile.subject && !isUniversalSubject(userProfile.subject)) {
         setSelectedSubject(userProfile.subject);
@@ -1489,6 +1639,18 @@ export default function App() {
       } else {
         setSelectedSubject('');
       }
+
+      const unsubArchives = subscribeToArchivedForms(userProfile, (liveForms) => {
+        setArchivedForms(liveForms);
+        setSelectedApprovedForm((prev) => {
+          if (!prev) return null;
+          return liveForms.find((f) => f.id === prev.id) || prev;
+        });
+      });
+
+      return () => {
+        unsubArchives();
+      };
     } else {
       setAssessments([]);
       setCurrentAssessment(null);
@@ -1497,6 +1659,32 @@ export default function App() {
       setSelectedSubject('');
     }
   }, [userProfile]);
+
+  // Enforce subject isolation guard for moderators: Ensure selected teacher matches moderator's specialty subject
+  useEffect(() => {
+    if (userProfile?.role === 'moderator' && selectedModeratorTeacher) {
+      const modSubj = userProfile.subject || '';
+      const hasMatchingAss = assessments.some(a => 
+        (formatCleanTeacherName(a.teacherName, a.schoolEmail) === selectedModeratorTeacher || a.teacherName === selectedModeratorTeacher || a.schoolEmail === selectedModeratorTeacher) &&
+        a.subject && isSubjectMatch(modSubj, a.subject)
+      );
+      const hasMatchingForm = archivedForms.some(f => 
+        (formatCleanTeacherName(f.teacherName, f.schoolEmail) === selectedModeratorTeacher || f.teacherName === selectedModeratorTeacher) &&
+        (f.subject || f.subjectName) && isSubjectMatch(modSubj, f.subject || f.subjectName)
+      );
+      if (!hasMatchingAss && !hasMatchingForm) {
+        const matchingAss = assessments.find(a => a.subject && isSubjectMatch(modSubj, a.subject));
+        const matchingForm = archivedForms.find(f => (f.subject || f.subjectName) && isSubjectMatch(modSubj, f.subject || f.subjectName));
+        if (matchingAss) {
+          setSelectedModeratorTeacher(formatCleanTeacherName(matchingAss.teacherName, matchingAss.schoolEmail));
+        } else if (matchingForm) {
+          setSelectedModeratorTeacher(formatCleanTeacherName(matchingForm.teacherName));
+        } else {
+          setSelectedModeratorTeacher(null);
+        }
+      }
+    }
+  }, [userProfile, selectedModeratorTeacher, assessments, archivedForms]);
 
   // --- Reload Activity logs when selection changes ---
   useEffect(() => {
@@ -1782,62 +1970,47 @@ export default function App() {
 
   // --- EMAIL AND PASSWORD AUTHENTICATION & DIRECT TESTING GATEWAY ---
   const handleAuthForCredentials = async (email: string, pass: string, roleSelection: 'none' | 'director' | 'teacher' | 'moderator' | 'admin') => {
-    if (!roleSelection || roleSelection === 'none') {
-      handleError(language === 'ar' ? "يرجى تحديد الصفة المهنية أولاً قبل تسجيل الدخول." : "Please select your professional role before logging in.");
-      return;
-    }
-
     const trimmedEmail = email.trim().toLowerCase();
 
     // Check account vs selected role compatibility
-    const isAccountAdmin = trimmedEmail === 'hossam9866@moe.om' || trimmedEmail === 'housmhousm17@gmail.com';
+    const isAccountAdmin =
+      trimmedEmail === 'hossam9866@moe.om' ||
+      trimmedEmail === 'housmhousm17@gmail.com' ||
+      trimmedEmail === 'houcemomri2017@gmail.com' ||
+      trimmedEmail === 'admin@moe.om';
     const isAccountDirector = trimmedEmail === 'school@moe.om';
     const isAccountTeacher = trimmedEmail === 'teacher@moe.om';
     const isAccountModerator = trimmedEmail === 'moderator@moe.om';
 
-    if (isAccountAdmin && roleSelection !== 'admin') {
+    const effectiveRoleSelection = isAccountAdmin && (!roleSelection || roleSelection === 'none')
+      ? 'admin'
+      : roleSelection;
+
+    if (!effectiveRoleSelection || effectiveRoleSelection === 'none') {
+      handleError(language === 'ar' ? "يرجى تحديد الصفة المهنية أولاً قبل تسجيل الدخول." : "Please select your professional role before logging in.");
+      return;
+    }
+
+    if (isAccountDirector && effectiveRoleSelection !== 'director') {
       handleError("choose your correct role");
       return;
     }
-    if (isAccountDirector && roleSelection !== 'director') {
+    if (isAccountTeacher && effectiveRoleSelection !== 'teacher') {
       handleError("choose your correct role");
       return;
     }
-    if (isAccountTeacher && roleSelection !== 'teacher') {
-      handleError("choose your correct role");
-      return;
-    }
-    if (isAccountModerator && roleSelection !== 'moderator') {
+    if (isAccountModerator && effectiveRoleSelection !== 'moderator') {
       handleError("choose your correct role");
       return;
     }
 
-    if (roleSelection === 'admin' && !isAccountAdmin) {
-      handleError("choose your correct role");
-      return;
-    }
-
-    // For other custom users, check profile in database
-    const uid = 'user-' + trimmedEmail.replace(/[^a-zA-Z0-9]/g, '');
-    const prof = await getUserProfile(uid);
-    if (prof) {
-      let userAssignedRoleType: string = prof.role;
-      if (prof.role === 'school') {
-        userAssignedRoleType = prof.roleType === 'administrative' ? 'director' : 'teacher';
-      }
-      if (userAssignedRoleType !== roleSelection && prof.role !== 'admin') {
-        handleError("choose your correct role");
-        return;
-      }
-    }
-    
     // Check if there is a custom updated password from the "Forgot Password" OTP flow
     const savedPasswords = JSON.parse(localStorage.getItem('oman_moe_custom_passwords') || '{}');
     const customPass = savedPasswords[trimmedEmail];
-    
+
     // --- RELIABLE PRE-CONFIGURED MINISTERIAL SYSTEM ACCOUNTS ---
-    // 1. Primary System Administrator (hossam9866@moe.om)
-    if (trimmedEmail === 'hossam9866@moe.om' || trimmedEmail === 'housmhousm17@gmail.com') {
+    // 1. Primary System Administrator (hossam9866@moe.om / admin@moe.om)
+    if (isAccountAdmin) {
       setAuthLoading(true);
       setErrorMessage(null);
 
@@ -1849,15 +2022,17 @@ export default function App() {
         // Silently catch Firebase auth provider mismatch
       }
 
-      const savedHossamRole = (localStorage.getItem('oman_moe_hossam_role') as UserRole) || 'admin';
-      const currentRole = savedHossamRole === 'moderator' ? 'moderator' : 'admin';
+      const targetRole: UserRole = effectiveRoleSelection === 'moderator' ? 'moderator' : 'admin';
+      localStorage.setItem('oman_moe_hossam_role', targetRole);
+      setSelectedAuthRole(targetRole);
+
       const adminProf: UserProfile = {
         uid: 'demo-admin-1',
         name: 'أ. حسام عمري',
         email: 'hossam9866@moe.om',
-        role: currentRole,
-        jobTitle: currentRole === 'moderator' ? 'فاحص ومعتمد اللغة الإنجليزية' : 'مدير النظام',
-        subject: currentRole === 'moderator' ? 'English Language' : undefined,
+        role: targetRole,
+        jobTitle: targetRole === 'moderator' ? 'فاحص ومعتمد اللغة الإنجليزية' : 'مدير النظام',
+        subject: targetRole === 'moderator' ? 'English Language' : undefined,
         directorate: 'المديرية العامة للتربية والتعليم بمحافظة الوسطى',
         createdAt: new Date().toISOString()
       };
@@ -1872,13 +2047,46 @@ export default function App() {
         profileUnsubscribeRef.current();
       }
       const unsub = subscribeToUserProfile('demo-admin-1', (updatedProf) => {
-        if (updatedProf) setUserProfile(updatedProf);
+        if (updatedProf) {
+          const activeHossamRole = (localStorage.getItem('oman_moe_hossam_role') as UserRole) || 'admin';
+          setUserProfile({
+            ...updatedProf,
+            role: activeHossamRole === 'moderator' ? 'moderator' : 'admin',
+            jobTitle: activeHossamRole === 'moderator' ? 'فاحص ومعتمد اللغة الإنجليزية' : 'مدير النظام'
+          });
+        }
       });
       profileUnsubscribeRef.current = unsub;
       setUserProfile(adminProf);
       setShowOnboarding(false);
       setAuthLoading(false);
-      handleSuccess(language === 'ar' ? "تم تسجيل الدخول بنجاح كمدير النظام (أ. حسام عمري)." : "Authenticated successfully as System Administrator (Hossam Omri).");
+      handleSuccess(
+        targetRole === 'admin'
+          ? (language === 'ar' ? "تم تسجيل الدخول بنجاح كمدير النظام (أ. حسام عمري)." : "Authenticated successfully as System Administrator (Hossam Omri).")
+          : (language === 'ar' ? "تم تسجيل الدخول بنجاح كفاحص ومعتمد اللغة الإنجليزية (أ. حسام عمري)." : "Authenticated successfully as English Moderator (Hossam Omri).")
+      );
+      return;
+    }
+
+    // For other custom users, check profile in database safely
+    const uid = 'user-' + trimmedEmail.replace(/[^a-zA-Z0-9]/g, '');
+    let prof: UserProfile | null = null;
+    try {
+      prof = await getUserProfile(uid);
+    } catch (e) {
+      console.warn("Could not fetch user profile before login:", e);
+    }
+    if (prof) {
+      let userAssignedRoleType: string = prof.role;
+      if (prof.role === 'school') {
+        userAssignedRoleType = prof.roleType === 'administrative' ? 'director' : 'teacher';
+      }
+      if (userAssignedRoleType !== effectiveRoleSelection && prof.role !== 'admin') {
+        handleError("choose your correct role");
+        return;
+      }
+    } else if (effectiveRoleSelection === 'admin') {
+      handleError("choose your correct role");
       return;
     }
 
@@ -1905,8 +2113,8 @@ export default function App() {
         uid: 'demo-mod-1',
         name: 'أ. سالم الحارثي',
         role: 'moderator',
-        subject: 'Mathematics',
-        jobTitle: 'مشرف ومدقق تربوي'
+        subject: 'Science',
+        jobTitle: 'فاحص ومدقق مادة العلوم العامة'
       }
     };
 
@@ -1953,25 +2161,30 @@ export default function App() {
     // Fallback for custom user email override sign-in
     if (customPass) {
       if (!isSignUpMode && pass === customPass) {
-        setSandboxActive(true);
-        setSandbox(true);
+        setSandboxActive(false);
+        setSandbox(false);
         const uid = 'custom-' + trimmedEmail.replace(/[^a-zA-Z0-9]/g, '');
         let prof = await getUserProfile(uid);
         if (!prof) {
-          const isAuditorEmail = trimmedEmail.includes('mod') || trimmedEmail.includes('auditor') || selectedAuthRole === 'moderator';
+          const isAuditorEmail = trimmedEmail.includes('mod') || trimmedEmail.includes('auditor') || roleSelection === 'moderator' || selectedAuthRole === 'moderator';
+          const isDirectorEmail = roleSelection === 'director' || selectedAuthRole === 'director' || trimmedEmail === 'school@moe.om' || trimmedEmail.includes('principal') || trimmedEmail.includes('director');
           const savedProfiles = JSON.parse(localStorage.getItem('oman_moe_user_profiles_cache') || '{}');
           prof = savedProfiles[trimmedEmail] || {
             uid,
             name: trimmedEmail.split('@')[0],
             email: trimmedEmail,
             role: isAuditorEmail ? 'moderator' : 'school',
-            roleType: isAuditorEmail ? undefined : 'teacher',
+            roleType: isAuditorEmail ? undefined : (isDirectorEmail ? 'administrative' : 'teacher'),
             schoolName: isAuditorEmail ? undefined : 'مدرسة الدقم للتعليم الأساسي',
-            subject: isAuditorEmail ? 'All Subjects' : 'Science',
-            jobTitle: isAuditorEmail ? 'مشرف ومدقق تربوي' : 'معلم مادة',
+            subject: isAuditorEmail ? 'All Subjects' : (isDirectorEmail ? undefined : 'Science'),
+            jobTitle: isAuditorEmail ? 'مشرف ومدقق تربوي' : (isDirectorEmail ? 'مدير مدرسة' : 'معلم مادة'),
             createdAt: new Date().toISOString()
           };
           await createUserProfile(prof);
+        } else if (roleSelection === 'director' || selectedAuthRole === 'director') {
+          prof.role = 'school';
+          prof.roleType = 'administrative';
+          prof.jobTitle = 'مدير مدرسة';
         }
         if (profileUnsubscribeRef.current) {
           profileUnsubscribeRef.current();
@@ -2462,17 +2675,11 @@ export default function App() {
         }
       }
 
-      // Examiners / Moderators see files of their specialty subject, or all files if universal auditor or 'ALL' selected
+      // Examiners / Moderators strictly see ONLY files of their assigned specialty subject
       if (userProfile && userProfile.role === 'moderator') {
-        const isUniversalAuditor = isUniversalSubject(userProfile.subject);
-        if (selectedSubject && selectedSubject !== 'ALL') {
-          if (!isSubjectMatch(selectedSubject, item.subject)) {
-            return false;
-          }
-        } else if (!isUniversalAuditor && selectedSubject !== 'ALL') {
-          if (!isSubjectMatch(userProfile.subject, item.subject)) {
-            return false;
-          }
+        const modSubj = userProfile.subject || '';
+        if (!modSubj || !item.subject || isUniversalSubject(item.subject) || !isSubjectMatch(modSubj, item.subject)) {
+          return false;
         }
       }
 
@@ -2480,9 +2687,11 @@ export default function App() {
                             item.subject.toLowerCase().includes(searchQuery.toLowerCase()) ||
                             item.schoolName.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesGrade = selectedGrade ? item.grade === selectedGrade : true;
-      const matchesSubject = (selectedSubject && selectedSubject !== 'ALL') 
-        ? isSubjectMatch(selectedSubject, item.subject) 
-        : true;
+      const matchesSubject = (userProfile?.role === 'moderator')
+        ? true
+        : ((selectedSubject && selectedSubject !== 'ALL') 
+          ? isSubjectMatch(selectedSubject, item.subject) 
+          : true);
       const matchesStatus = selectedStatus ? item.status === selectedStatus : true;
 
       return matchesSearch && matchesGrade && matchesSubject && matchesStatus;
@@ -2535,7 +2744,7 @@ export default function App() {
         guestView={guestView}
         onSelectGuestView={(view) => {
           setGuestView(view);
-          if (view === 'forgot-password') {
+          if (view === 'forgot-password' || view === 'admin-portal') {
             setSelectedAuthRole('admin');
           }
         }}
@@ -2705,21 +2914,77 @@ export default function App() {
             
             {/* MAIN CANVAS CONTENT */}
             <ErrorBoundary>
-            <div className="space-y-7 min-w-0">
+            <div className="space-y-6 min-w-0">
 
+              {/* Quick Top Workspace Bar with Live Form Tracker Access */}
+              <div className="bg-white rounded-2xl p-2.5 border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab('overview');
+                      setPrincipalTab('staff');
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                      activeTab === 'overview'
+                        ? 'bg-[#0b5e32] text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700'
+                    }`}
+                  >
+                    <LayoutDashboard className="w-3.5 h-3.5" />
+                    <span>{language === 'ar' ? 'اللوحة الرئيسية' : 'Main Workspace'}</span>
+                  </button>
 
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('tracker')}
+                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 border ${
+                      activeTab === 'tracker'
+                        ? 'bg-amber-400 text-slate-950 border-amber-500 shadow-sm scale-[1.01]'
+                        : 'bg-emerald-50 hover:bg-emerald-100/80 text-[#0b5e32] border-emerald-300/80'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${activeTab === 'tracker' ? 'bg-slate-950 animate-ping' : 'bg-emerald-500 animate-ping'}`} />
+                    <span>{language === 'ar' ? '📡 تتبع الاستمارة (متزامن لحظياً)' : '📡 Live Form Tracker'}</span>
+                    <span className="px-1.5 py-0.5 rounded-full text-[10px] font-mono bg-black/10">
+                      {archivedForms.length}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('archive')}
+                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                      activeTab === 'archive'
+                        ? 'bg-[#0b5e32] text-white shadow-xs'
+                        : 'bg-slate-100 hover:bg-slate-200/80 text-slate-700'
+                    }`}
+                  >
+                    <ClipboardList className="w-3.5 h-3.5" />
+                    <span>{language === 'ar' ? 'الأرشيف والاستمارات الرسمية' : 'Official Forms Archive'}</span>
+                  </button>
+                </div>
+
+                <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-xl bg-emerald-50/70 border border-emerald-200/60 text-[11px] font-bold text-emerald-900">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>{language === 'ar' ? 'مزامنة الاستمارات نشطة لجميع الحسابات' : 'Real-Time Form Sync Active'}</span>
+                </div>
+              </div>
 
               {activeTab === 'overview' && (
                 <div className="space-y-7 animate-in fade-in duration-200">
                   
-                  {/* Live stats counters */}
-                  <OverviewStats 
-                    assessments={assessments} 
-                    language={language} 
-                    selectedStatus={selectedStatus}
-                    onStatusClick={(status) => setSelectedStatus(selectedStatus === status ? '' : status)}
-                    userRoleType={userProfile?.roleType || undefined}
-                  />
+                  {/* Live stats counters - Hidden for moderator, school principal, and teacher accounts */}
+                  {userProfile.role === 'admin' && (
+                    <OverviewStats 
+                      assessments={assessments} 
+                      language={language} 
+                      selectedStatus={selectedStatus}
+                      onStatusClick={(status) => setSelectedStatus(selectedStatus === status ? '' : status)}
+                      userRoleType={userProfile?.roleType || undefined}
+                      userRole={userProfile?.role}
+                    />
+                  )}
 
             {/* Admin navigation override - Stats Tab Selector */}
             {userProfile.role === 'admin' && (
@@ -2804,84 +3069,6 @@ export default function App() {
               </div>
             )}
 
-            {/* School Principal/Representative navigation override */}
-            {userProfile.role === 'school' && userProfile.roleType === 'administrative' && (
-              <div className="flex overflow-x-auto no-scrollbar bg-slate-100 rounded-xl sm:rounded-2xl p-1 max-w-md mx-auto border border-slate-200/60 shadow-xs gap-1 font-sans animate-in fade-in duration-150">
-                <button
-                  type="button"
-                  onClick={() => setPrincipalTab('staff')}
-                  className={`flex-1 py-1.5 px-2 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
-                    principalTab === 'staff' 
-                      ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  {language === 'ar' ? '👩‍🏫 متابعة المعلمين' : '👩‍🏫 Staff Observer'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrincipalTab('catalog')}
-                  className={`flex-1 py-1.5 px-2 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
-                    principalTab === 'catalog' 
-                      ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  {language === 'ar' ? '📁 ملفات المدرسة' : '📁 All School Uploads'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrincipalTab('archive')}
-                  className={`flex-1 py-1.5 px-2 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
-                    principalTab === 'archive' 
-                      ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  {language === 'ar' ? '🗃️ الأرشيف والاعتماد' : '🗃️ Board Archive'}
-                </button>
-              </div>
-            )}
-
-            {/* School Teacher navigation tab bar */}
-            {userProfile.role === 'school' && userProfile.roleType === 'teacher' && (
-              <div className="flex overflow-x-auto no-scrollbar bg-slate-100 rounded-xl sm:rounded-2xl p-1 max-w-md mx-auto border border-slate-200/60 shadow-xs gap-1 font-sans animate-in fade-in duration-150 mb-2">
-                <button
-                  type="button"
-                  onClick={() => setPrincipalTab('staff')}
-                  className={`flex-1 py-1.5 px-2.5 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
-                    principalTab === 'staff' 
-                      ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  {language === 'ar' ? '📁 بوابة رفع الملفات' : '📁 Uploads Portal'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrincipalTab('catalog')}
-                  className={`flex-1 py-1.5 px-2.5 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
-                    principalTab === 'catalog' 
-                      ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  {language === 'ar' ? '💬 محادثة التدقيق (واتساب)' : '💬 Audit Chat (WhatsApp)'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPrincipalTab('archive')}
-                  className={`flex-1 py-1.5 px-2.5 sm:px-3 rounded-lg sm:rounded-xl text-[10px] sm:text-[10.5px] font-bold leading-none whitespace-nowrap transition-all cursor-pointer ${
-                    principalTab === 'archive' 
-                      ? 'bg-[#0b5e32] text-white shadow-xs' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
-                  }`}
-                >
-                  {language === 'ar' ? '🗃️ الأرشيف والتوقيع' : '🗃️ Board Archive'}
-                </button>
-              </div>
-            )}
-
             {userProfile.role === 'admin' && adminTab === 'stats' ? (
               <AdminStatsDashboard assessments={assessments} language={language} />
             ) : userProfile.role === 'admin' && adminTab === 'plan' ? (
@@ -2929,7 +3116,186 @@ export default function App() {
                   onError={handleError}
                 />
               </div>
-            ) : userProfile.role === 'school' && principalTab === 'archive' ? (
+            ) : userProfile.role === 'school' && userProfile.roleType === 'administrative' && principalTab === 'catalog' ? (
+              // 💬 SCHOOL PRINCIPAL FORMS CONVERSATIONS: "استمارة أ. [اسم المعلم]"
+              <div className="max-w-6xl mx-auto space-y-4 animate-in fade-in duration-200">
+                <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl shadow-xl overflow-hidden">
+                  
+                  {/* Top Header */}
+                  <div className="bg-gradient-to-r from-emerald-800 to-[#075e54] text-white px-5 py-3.5 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-white/10 rounded-xl">
+                        <Users className="w-5 h-5 text-emerald-300" />
+                      </div>
+                      <div>
+                        <h3 className="font-extrabold text-sm sm:text-base font-heading">
+                          {language === 'ar' ? 'محادثات استمارات الفحص والتدقيق' : 'Forms Moderation Conversations'}
+                        </h3>
+                        <p className="text-[11px] text-emerald-100 font-medium">
+                          {userProfile.schoolName || 'مدرسة الدقم للتعليم الأساسي'}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs bg-emerald-950/60 text-emerald-200 border border-emerald-500/30 px-3 py-1 rounded-full font-bold">
+                      {language === 'ar' ? 'اعتماد وختم مدير المدرسة' : 'Principal Sign & Seal'}
+                    </span>
+                  </div>
+
+                  {(() => {
+                    const schoolForms = archivedForms;
+
+                    const schoolAssessments = assessments.filter(a => 
+                      a.schoolId === userProfile.uid || 
+                      isSameSchool(a.schoolName, userProfile.schoolName || '')
+                    );
+
+                    const teacherMap = new Map<string, { teacherName: string; subject: string; form?: ArchivedForm; assessment?: Assessment }>();
+                    
+                    schoolForms.forEach(f => {
+                      const tClean = formatCleanTeacherName(f.teacherName, f.schoolEmail);
+                      if (!teacherMap.has(tClean)) {
+                        teacherMap.set(tClean, { teacherName: tClean, subject: f.subjectName || f.subject, form: f });
+                      } else {
+                        const cur = teacherMap.get(tClean)!;
+                        if (!cur.form) cur.form = f;
+                      }
+                    });
+
+                    schoolAssessments.forEach(a => {
+                      const tClean = formatCleanTeacherName(a.teacherName, a.schoolEmail);
+                      if (!teacherMap.has(tClean)) {
+                        teacherMap.set(tClean, { teacherName: tClean, subject: a.subject, assessment: a });
+                      }
+                    });
+
+                    if (teacherMap.size === 0) {
+                      teacherMap.set('د. فاطمة السيابية', { 
+                        teacherName: 'د. فاطمة السيابية', 
+                        subject: 'العلوم العامة' 
+                      });
+                    }
+
+                    const threadList = Array.from(teacherMap.values());
+                    const currentTeacherKey = principalSelectedTeacher || threadList[0]?.teacherName || 'د. فاطمة السيابية';
+                    const activeThread = threadList.find(t => t.teacherName === currentTeacherKey) || threadList[0];
+
+                    return (
+                      <div className="grid grid-cols-1 lg:grid-cols-12 min-h-[640px]">
+                        
+                        {/* 📋 Sidebar of Form Conversations named "استمارة أ. [اسم المعلم]" */}
+                        <div className="lg:col-span-4 border-b lg:border-b-0 lg:border-l border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-[#111b21] p-3 space-y-2 overflow-y-auto max-h-[260px] lg:max-h-[calc(84vh-50px)]">
+                          <div className="px-2 py-1.5 flex items-center justify-between text-xs font-bold text-slate-500 dark:text-slate-400">
+                            <span>{language === 'ar' ? 'قائمة الاستمارات' : 'Forms List'}</span>
+                            <span className="font-mono bg-slate-200 dark:bg-slate-800 px-2 py-0.5 rounded-full text-[10.5px]">
+                              {threadList.length}
+                            </span>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            {threadList.map((item, idx) => {
+                              const isSelected = item.teacherName === currentTeacherKey;
+                              const form = item.form;
+                              
+                              let statusText = '1. ملء وتوقيع المدقق';
+                              let statusClass = 'text-amber-700 bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300';
+                              if (form?.workflowStage === 'completed' || (form?.isSigned && form?.isTeacherSigned)) {
+                                statusText = '✓ معتمدة ومكتملة';
+                                statusClass = 'text-emerald-700 bg-emerald-100 dark:bg-emerald-950/60 dark:text-emerald-300';
+                              } else if (form?.workflowStage === 'principal_signed_transferred_to_teacher' || form?.isSigned) {
+                                statusText = '4. توقيع المعلم';
+                                statusClass = 'text-indigo-700 bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300';
+                              } else if (form?.workflowStage === 'admin_transferred_to_principal') {
+                                statusText = '3. توقيع وختم مدير المدرسة وتحويل للمعلم';
+                                statusClass = 'text-blue-700 bg-blue-100 dark:bg-blue-950/60 dark:text-blue-300';
+                              } else if (form?.workflowStage === 'examiner_submitted_to_admin' || !form?.workflowStage) {
+                                statusText = '2. تحويل لمدير المدرسة';
+                                statusClass = 'text-amber-700 bg-amber-100 dark:bg-amber-950/60 dark:text-amber-300';
+                              }
+
+                              return (
+                                <button
+                                  key={`p_thread_${idx}`}
+                                  type="button"
+                                  onClick={() => setPrincipalSelectedTeacher(item.teacherName)}
+                                  className={`w-full p-3 rounded-2xl text-right rtl:text-right ltr:text-left transition-all cursor-pointer flex items-center gap-3 border ${
+                                    isSelected 
+                                      ? 'bg-white dark:bg-[#202c33] border-emerald-500 shadow-md ring-2 ring-emerald-500/20' 
+                                      : 'bg-white/60 dark:bg-slate-800/40 border-slate-200/70 dark:border-slate-800 hover:bg-white dark:hover:bg-slate-800'
+                                  }`}
+                                >
+                                  <div className="w-10 h-10 rounded-full bg-emerald-700 text-white font-black flex items-center justify-center text-sm shrink-0 shadow-xs">
+                                    {item.teacherName.charAt(0)}
+                                  </div>
+
+                                  <div className="min-w-0 flex-1 space-y-0.5">
+                                    <h4 className="font-extrabold text-xs text-slate-900 dark:text-slate-100 truncate">
+                                      استمارة أ. {formatCleanTeacherName(item.teacherName)}
+                                    </h4>
+                                    <p className="text-[10.5px] text-slate-500 dark:text-slate-400 truncate font-medium">
+                                      {item.subject}
+                                    </p>
+                                    <div className="pt-0.5">
+                                      <span className={`text-[9.5px] px-2 py-0.5 rounded-full font-bold inline-block ${statusClass}`}>
+                                        {statusText}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* 💬 Main Panel: WhatsAppAuditChat for selected teacher form */}
+                        <div className="lg:col-span-8 flex flex-col">
+                          <WhatsAppAuditChat
+                            userProfile={userProfile}
+                            teacherName={activeThread?.teacherName || 'د. فاطمة السيابية'}
+                            schoolName={userProfile.schoolName || 'مدرسة الدقم للتعليم الأساسي'}
+                            subjectName={activeThread?.subject || 'العلوم العامة'}
+                            assessments={assessments.filter(a => 
+                              formatCleanTeacherName(a.teacherName, a.schoolEmail) === activeThread?.teacherName ||
+                              a.teacherName === activeThread?.teacherName ||
+                              (a.schoolName === userProfile.schoolName)
+                            )}
+                            archivedForms={schoolForms}
+                            language={language}
+                            onStartAuditForm={(tName, schName, subjName, targetAss) => {
+                              handleStartAuditFormFromChat(tName, schName, subjName, targetAss);
+                            }}
+                            onTeacherSignAndForward={async (archiveId, tName, qrData) => {
+                              await signArchivedTeacherForm(archiveId, tName, qrData);
+                              await fetchArchivedFormsList();
+                            }}
+                            onAdminForwardToPrincipal={async (archiveId, adminName) => {
+                              await transferArchivedFormToPrincipal(archiveId, adminName);
+                              await fetchArchivedFormsList();
+                            }}
+                            onAdminForwardToTeacher={async (archiveId, adminName) => {
+                              await transferArchivedFormToTeacher(archiveId, adminName);
+                              await fetchArchivedFormsList();
+                            }}
+                            onPrincipalSign={async (archiveId, pName, qrData, stampUrl) => {
+                              await signArchivedForm(archiveId, pName, qrData, stampUrl);
+                              await fetchArchivedFormsList();
+                            }}
+                            onMarkReadByExaminer={async (assId, exName) => {
+                              await markAssessmentReadByExaminer(assId, exName);
+                              await fetchAssessmentList();
+                            }}
+                            actionLoading={actionLoading}
+                            onSuccess={handleSuccess}
+                            onError={handleError}
+                          />
+                        </div>
+
+                      </div>
+                    );
+                  })()}
+
+                </div>
+              </div>
+            ) : userProfile.role === 'school' && (userProfile.roleType === 'administrative' || userProfile.jobTitle?.includes('مدير')) && principalTab === 'archive' ? (
               <div className="w-full space-y-6">
                 <SchoolArchiveView
                   archivedForms={archivedForms}
@@ -2946,11 +3312,17 @@ export default function App() {
                     await signArchivedExaminerForm(archiveId, eName, qrData, undefined, conformanceStatus, hasGradeRevisions);
                     await fetchArchivedFormsList();
                   }}
+                  onTransferToPrincipal={async (archiveId, adminName) => {
+                    await transferArchivedFormToPrincipal(archiveId, adminName);
+                    await fetchArchivedFormsList();
+                  }}
                   userProfile={userProfile}
                   onSuccess={handleSuccess}
+                  initialSelectedFormId={trackerSelectedFormId}
+                  onOpenTracker={() => setActiveTab('tracker')}
                 />
               </div>
-            ) : userProfile.role === 'school' && userProfile.roleType === 'teacher' && principalTab === 'catalog' ? (
+            ) : userProfile.role === 'school' && !(userProfile.roleType === 'administrative' || userProfile.jobTitle?.includes('مدير')) ? (
               <div className="max-w-5xl mx-auto space-y-6">
                 <WhatsAppAuditChat
                   userProfile={userProfile}
@@ -2958,9 +3330,26 @@ export default function App() {
                   schoolName={userProfile.schoolName || 'مدرسة الدقم للتعليم الأساسي'}
                   subjectName={userProfile.subject || 'العلوم العامة'}
                   assessments={assessments.filter((item) => item.schoolId === userProfile.uid)}
+                  archivedForms={archivedForms}
                   language={language}
                   onStartAuditForm={(tName, schName, subjName, targetAss) => {
                     handleStartAuditFormFromChat(tName, schName, subjName, targetAss);
+                  }}
+                  onTeacherSignAndForward={async (archiveId, tName, qrData) => {
+                    await signArchivedTeacherForm(archiveId, tName, qrData);
+                    await fetchArchivedFormsList();
+                  }}
+                  onAdminForwardToTeacher={async (archiveId, adminName) => {
+                    await transferArchivedFormToTeacher(archiveId, adminName);
+                    await fetchArchivedFormsList();
+                  }}
+                  onPrincipalSign={async (archiveId, pName, qrData, stampUrl) => {
+                    await signArchivedForm(archiveId, pName, qrData, stampUrl);
+                    await fetchArchivedFormsList();
+                  }}
+                  onMarkReadByExaminer={async (assId, exName) => {
+                    await markAssessmentReadByExaminer(assId, exName);
+                    await fetchAssessmentList();
                   }}
                   onUploadNewFile={async (payload) => {
                     setActionLoading(true);
@@ -2984,50 +3373,6 @@ export default function App() {
                       }
                     } catch (err: any) {
                       handleError(err.message || 'Error uploading file');
-                    } finally {
-                      setActionLoading(false);
-                    }
-                  }}
-                  actionLoading={actionLoading}
-                  onSuccess={handleSuccess}
-                  onError={handleError}
-                />
-              </div>
-            ) : userProfile.role === 'school' && userProfile.roleType === 'teacher' ? (
-              <div className="max-w-4xl mx-auto space-y-6">
-                <TeacherUploadsView
-                  userProfile={userProfile}
-                  language={language}
-                  previousAssessments={assessments.filter((item) => item.schoolId === userProfile.uid)}
-                  onUploadAssessment={async (payload) => {
-                    setActionLoading(true);
-                    try {
-                      const fullPayload = {
-                        ...payload,
-                        subject: (userProfile.roleType === 'teacher' && userProfile.subject) ? userProfile.subject : payload.subject,
-                        schoolId: userProfile.uid,
-                        schoolName: userProfile.schoolName || userProfile.name,
-                        schoolEmail: userProfile.email,
-                        status: 'Pending' as AssessmentStatus
-                      };
-                      const newId = await uploadAssessment(fullPayload);
-                      if (newId) {
-                        handleSuccess(
-                          language === 'ar' 
-                            ? `تم رفع ملف التقييم الـ PDF "${payload.title}" بنجاح وجاري المراجعة الإشرافية.` 
-                            : `PDF assessment file "${payload.title}" successfully uploaded and queued for supervisor moderation.`
-                        );
-                        // Refresh the assessment list
-                        await fetchAssessmentList();
-                      } else {
-                        handleError(
-                          language === 'ar'
-                            ? 'فشل رفع الملف إلى البوابة الدراسية.'
-                            : 'Failed to upload PDF document file.'
-                        );
-                      }
-                    } catch (err: any) {
-                      handleError(err.message || 'An error occurred during upload.');
                     } finally {
                       setActionLoading(false);
                     }
@@ -3437,24 +3782,32 @@ export default function App() {
                         <option key="audit-grade-default" value="">{getTranslatedText('allGrades', language)}</option>
                         {GRADES.map((g, index) => <option key={`audit-grade-${g}-${index}`} value={g}>{translateGrade(g, language)}</option>)}
                       </select>
-                      <select
-                        value={selectedSubject}
-                        onChange={(e) => setSelectedSubject(e.target.value)}
-                        className="px-3 py-2 border border-slate-100 rounded-xl text-xs text-slate-600 bg-slate-50 font-medium cursor-pointer text-ellipsis overflow-hidden"
-                      >
-                        <option key="audit-subj-default" value="">
-                          {userProfile?.role === 'moderator' && !isUniversalSubject(userProfile?.subject)
-                            ? `${language === 'ar' ? 'تخصصي: ' : 'My Specialty: '}${translateSubject(userProfile.subject || '', language)}`
-                            : getTranslatedText('allSubjects', language)
-                          }
-                        </option>
-                        {userProfile?.role === 'moderator' && !isUniversalSubject(userProfile?.subject) && (
-                          <option key="audit-subj-all" value="ALL">
-                            {language === 'ar' ? '🌟 استعراض كافة المواد' : '🌟 View All Subjects'}
-                          </option>
-                        )}
-                        {SUBJECTS.map((s, index) => <option key={`audit-subj-${s}-${index}`} value={s}>{translateSubject(s, language)}</option>)}
-                      </select>
+                      {userProfile?.role === 'moderator' ? (
+                        <div 
+                          className="px-3 py-2 border border-emerald-200/80 bg-emerald-50 text-emerald-800 rounded-xl text-xs font-bold flex items-center justify-between gap-1.5 truncate shadow-2xs"
+                          title={translateSubject(userProfile.subject || '', language)}
+                        >
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="w-2 h-2 rounded-full bg-emerald-600 shrink-0"></span>
+                            <span className="truncate">
+                              {language === 'ar' ? 'مادتي: ' : 'Subject: '}
+                              {translateSubject(userProfile.subject || '', language)}
+                            </span>
+                          </div>
+                          <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 uppercase shrink-0 font-mono">
+                            {language === 'ar' ? 'معتمد' : 'ONLY'}
+                          </span>
+                        </div>
+                      ) : (
+                        <select
+                          value={selectedSubject}
+                          onChange={(e) => setSelectedSubject(e.target.value)}
+                          className="px-3 py-2 border border-slate-100 rounded-xl text-xs text-slate-600 bg-slate-50 font-medium cursor-pointer text-ellipsis overflow-hidden"
+                        >
+                          <option key="audit-subj-default" value="">{getTranslatedText('allSubjects', language)}</option>
+                          {SUBJECTS.map((s, index) => <option key={`audit-subj-${s}-${index}`} value={s}>{translateSubject(s, language)}</option>)}
+                        </select>
+                      )}
                     </div>
 
                     {/* Selected status indicator reset option */}
@@ -3478,7 +3831,7 @@ export default function App() {
                     )}
 
                     {/* Paper Item Rows or Moderator Drill-down Navigation */}
-                    <div className="space-y-2.5 pt-2 max-h-[58vh] overflow-y-auto pr-1">
+                    <div className="space-y-2.5 pt-2 max-h-[72vh] sm:max-h-[76vh] overflow-y-auto pr-1">
                       {dataLoading ? (
                         <div className="text-center py-12 space-y-3">
                           <div className="w-9 h-9 rounded-full border-2 border-slate-200 border-t-indigo-600 animate-spin mx-auto"></div>
@@ -3982,56 +4335,64 @@ export default function App() {
                           </div>
 
                         {/* Wide Horizontal-Stack bands for perfect high-fidelity aesthetic alignment and legibility */}
-                        <div className="space-y-4 relative z-10 text-right">
+                        <div className="flex flex-col relative z-10 text-right" style={{ gap: formStyles?.sectionSpacingY || '16px' }}>
                           
                           {/* Row 1: Unified Metadata block stretching horizontally with side-by-side specs and target teacher details */}
-                          <div className="grid grid-cols-12 gap-3.5 text-right" dir="rtl">
+                          <div className="grid grid-cols-12 gap-3.5 text-right" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px', marginBottom: formStyles?.metaMarginBottom || '0px' }}>
                             
                             {/* Form Specifications: col-span-5 */}
-                            <div className="col-span-5 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between">
+                            <div className="col-span-5 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between" style={{ width: '41.5%', flex: '0 0 41.5%', boxSizing: 'border-box' }}>
                               <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
                                 {language === 'ar' ? 'بيانات استمارة الفحص والتدقيق المستمر' : 'Specification of Alignment'}
                               </div>
-                              <table className="w-full text-[16px] border-collapse h-full text-right" dir="rtl">
+                              <table className="w-full text-[16px] border-collapse h-full text-right" dir="rtl" style={{ tableLayout: 'fixed', width: '100%' }}>
                                 <tbody>
                                   <tr className="border-b border-[#821315]/45 bg-slate-50/50">
-                                    <td className="font-extrabold font-sans text-[#821315] w-28 py-2 px-2 border-l border-[#821315]/45 text-right align-middle">المادة الدراسية:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 text-right align-middle">{selectedApprovedForm.subjectName || selectedApprovedForm.subject}</td>
+                                    <td className="font-extrabold font-sans text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle" style={{ width: '35%' }}>المادة الدراسية:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 text-right whitespace-normal break-words align-middle" style={{ width: '65%' }}>{selectedApprovedForm.subjectName || selectedApprovedForm.subject}</td>
                                   </tr>
                                   <tr className="border-b border-[#821315]/45">
-                                    <td className="font-extrabold font-sans text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle">العام الدراسي:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right align-middle">{selectedApprovedForm.academicYear}</td>
+                                    <td className="font-extrabold font-sans text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle" style={{ width: '35%' }}>العام الدراسي:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right whitespace-normal break-words align-middle" style={{ width: '65%' }}>{selectedApprovedForm.academicYear}</td>
                                   </tr>
                                   <tr className="bg-slate-50/50">
-                                    <td className="font-extrabold font-sans text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle">الفصل الدراسي:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 text-right align-middle">{selectedApprovedForm.semester}</td>
+                                    <td className="font-extrabold font-sans text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle" style={{ width: '35%' }}>الفصل الدراسي:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 text-right whitespace-normal break-words align-middle" style={{ width: '65%' }}>{selectedApprovedForm.semester}</td>
                                   </tr>
                                 </tbody>
                               </table>
                             </div>
 
                             {/* Target Teacher Profile: col-span-7 */}
-                            <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white text-right" dir="rtl">
+                            <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white text-right" dir="rtl" style={{ width: '57%', flex: '0 0 57%', boxSizing: 'border-box' }}>
                               <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
                                 {language === 'ar' ? 'بيانات المعلم المستهدف بالفحص والمتابعة' : 'Target Teacher General Bio-data'}
                               </div>
-                              <table className="w-full text-[16px] border-collapse relational-table text-right animate-none" dir="rtl">
+                              <table className="w-full text-[16px] border-collapse relational-table text-right animate-none" dir="rtl" style={{ tableLayout: 'fixed', width: '100%' }}>
                                 <tbody>
                                   <tr className="border-b border-[#821315]/45 bg-slate-50/20">
-                                    <td className="font-extrabold text-[#821315] w-24 py-2 px-2 border-l border-[#821315]/45 text-right align-middle">الاسم:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 text-right whitespace-normal break-words align-middle" colSpan={3}>{selectedApprovedForm.teacherName}</td>
+                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle" style={{ width: '22%' }}>الاسم:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 text-right whitespace-normal break-words align-middle" colSpan={3} style={{ width: '78%' }}>{selectedApprovedForm.teacherName}</td>
                                   </tr>
                                   <tr className="border-b border-[#821315]/45">
-                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-[#821315]/45 font-sans text-right align-middle">رقم الملف:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right align-middle">{selectedApprovedForm.teacherFileNo}</td>
-                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-r border-[#821315]/45 text-right font-sans align-middle">سنة التعيين:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right align-middle">{selectedApprovedForm.appointmentYear}</td>
+                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-[#821315]/45 font-sans text-right align-middle" style={{ width: '22%' }}>رقم الملف:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right whitespace-normal break-words align-middle" style={{ width: '28%' }}>{selectedApprovedForm.teacherFileNo}</td>
+                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-r border-[#821315]/45 text-right font-sans align-middle" style={{ width: '22%' }}>سنة التعيين:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right whitespace-normal break-words align-middle" style={{ width: '28%' }}>{selectedApprovedForm.appointmentYear}</td>
                                   </tr>
-                                  <tr>
-                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-[#821315]/45 font-sans text-right align-middle">المديرية:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 text-right whitespace-normal break-words align-middle">{selectedApprovedForm.directorate}</td>
-                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-r border-[#821315]/45 font-sans text-right align-middle">تاريخ الزيارة:</td>
-                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right align-middle">{selectedApprovedForm.visitDate}</td>
+                                  <tr className="border-b border-[#821315]/45 bg-slate-50/20">
+                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle" style={{ width: '22%' }}>المديرية:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 leading-normal whitespace-normal break-words text-[16px] text-right align-middle" colSpan={3} style={{ width: '78%' }}>{selectedApprovedForm.directorate}</td>
+                                  </tr>
+                                  <tr className="border-b border-[#821315]/45">
+                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-[#821315]/45 text-right align-middle" style={{ width: '22%' }}>المدرسة:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 text-right whitespace-normal break-words align-middle" colSpan={3} style={{ width: '78%' }}>{selectedApprovedForm.schoolName}</td>
+                                  </tr>
+                                  <tr className="bg-slate-50/20">
+                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-[#821315]/45 font-sans text-right align-middle" style={{ width: '22%' }}>التخصص:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 font-sans text-right whitespace-normal break-words align-middle" style={{ width: '28%' }}>{selectedApprovedForm.subject}</td>
+                                    <td className="font-extrabold text-[#821315] py-2 px-2 border-l border-r border-[#821315]/45 font-sans text-right align-middle" style={{ width: '22%' }}>تاريخ الزيارة:</td>
+                                    <td className="font-bold py-2 px-2 text-slate-800 font-mono text-right whitespace-normal break-words align-middle" style={{ width: '28%' }}>{selectedApprovedForm.visitDate}</td>
                                   </tr>
                                 </tbody>
                               </table>
@@ -4039,195 +4400,310 @@ export default function App() {
 
                           </div>
 
-                          {/* Row 2: Audited Students Data table */}
-                          <div className="border-2 border-black rounded overflow-hidden bg-white text-right font-sans mt-4" dir="rtl">
-                            <table className="w-full text-[16px] border-collapse text-right leading-normal font-sans" dir="rtl">
-                              <thead>
-                                <tr className="bg-[#fcfbee] border-b-2 border-black text-[15px]">
-                                  <th className="py-2 px-2 text-slate-905 border-l-2 border-black font-black text-right w-10">#</th>
-                                  <th className="py-2 px-3 text-slate-905 border-l-2 border-black font-black text-right">{language === 'ar' ? 'اسم الطالب المستهدف بالفرز والتقصي' : 'Student Full Name'}</th>
-                                  <th className="py-2 px-3 text-slate-905 border-l-2 border-black font-black text-center w-36">{language === 'ar' ? 'الأداة الفنية المفحوصة' : 'Assessment Tool'}</th>
-                                  <th className="py-2 px-2 text-slate-905 border-l-2 border-black font-black text-center w-28">
-                                    {selectedApprovedForm.grade === 'Grade 12' 
-                                      ? (language === 'ar' ? 'الدرجة' : 'Mark') 
-                                      : (language === 'ar' ? 'الدرجة المرصودة' : 'Recorded Mark')}
-                                  </th>
-                                  <th className="py-2 px-3 text-slate-905 font-black text-right border-l-2 border-black">
-                                    {selectedApprovedForm.grade === 'Grade 12'
-                                      ? (language === 'ar' ? 'سبب التعديل / ملاحظات التحقق' : 'Modification Reason / Audit Findings')
-                                      : (language === 'ar' ? 'حالة فحص الأداة ومطابقتها للمواصفات' : 'Tool Verification & Compliance')}
-                                  </th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {selectedApprovedForm.students && selectedApprovedForm.students.length > 0 ? (
-                                  selectedApprovedForm.students.map((st, index) => (
-                                    <tr 
-                                      key={`approved-view-student-${st.name || 'stud'}-${index}`} 
-                                      className={`border-b-2 border-black ${index % 2 === 1 ? 'bg-slate-50/40' : 'bg-white'}`}
-                                    >
-                                      <td className="py-2.5 px-2 text-slate-805 text-center font-mono border-l-2 border-black">{index + 1}</td>
-                                      <td className="py-2.5 px-3 text-slate-700 font-normal text-right border-l-2 border-black whitespace-normal break-words">{st.name}</td>
-                                      <td className="py-2.5 px-3 text-slate-700 text-center font-normal border-l-2 border-black whitespace-normal break-words">{st.level}</td>
-                                      <td className="py-2.5 px-2 text-slate-700 text-center font-mono font-black border-l-2 border-black">{st.mark}</td>
-                                      <td className="py-2.5 px-3 text-center text-slate-800 font-bold whitespace-normal break-words border-l-2 border-black">
-                                        {selectedApprovedForm.grade === 'Grade 12' && ['1', '2', '3', '4', '5', '6'].includes((st.notes || '').trim()) ? (
-                                          <span className="font-mono text-[#821315] font-black text-sm bg-red-50/50 px-2 py-0.5 rounded">{st.notes}</span>
-                                        ) : (
-                                          <span className="text-slate-700 font-medium">
-                                            {st.notes === 'لا يوجد' || !st.notes 
-                                              ? (selectedApprovedForm.grade === 'Grade 12' ? (language === 'ar' ? 'لا يوجد' : 'None') : (language === 'ar' ? 'مستوفٍ ومطابق للمواصفات' : 'Compliant')) 
-                                              : st.notes}
-                                          </span>
-                                        )}
-                                      </td>
-                                    </tr>
-                                  ))
-                                ) : (
-                                  <tr key="approved-students-empty">
-                                    <td colSpan={5} className="py-3 text-center text-slate-400 font-medium">{language === 'ar' ? 'لا توجد بيانات طلاب معروضة.' : 'No student audits listed.'}</td>
-                                  </tr>
-                                )}
-                              </tbody>
-                            </table>
-                          </div>
-
-                          {/* Row 3: Classroom Observation & Technical Observations */}
-                          <div className="grid grid-cols-12 gap-3 mt-4">
-                            <div className="col-span-8 border-2 border-black rounded overflow-hidden bg-white text-right font-sans" dir="rtl" style={{ contentVisibility: 'auto' }}>
-                              <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center font-sans">
-                                {selectedApprovedForm.grade !== 'Grade 12'
-                                  ? (language === 'ar' ? 'الملاحظات الفنية لأدوات التقويم المستمر (تُكتب بخط يد الفاحص)' : 'Technical Observations (Handwritten by Auditor)')
-                                  : (language === 'ar' ? 'بنود المطابقة التفصيلية وجودة محاذاة الأسئلة مع مناهج وزارة التعليم لسلطنة عمان' : 'Syllabus Benchmarks')}
-                              </div>
-
-                              {selectedApprovedForm.grade !== 'Grade 12' ? (
-                                /* Ruled Handwritten Observations View for Approved Continuous Audit */
-                                <div className="p-3 bg-[#faf9f5]/60 flex flex-col justify-between min-h-[220px]">
-                                  <div className="space-y-0 w-full font-sans">
-                                    {(() => {
-                                      const notesText = selectedApprovedForm.observations && selectedApprovedForm.observations.length > 0
-                                        ? selectedApprovedForm.observations.map(o => o.notes).filter(Boolean).join('\n')
-                                        : '• كراسات الطلاب وأعمالهم مصححة بانتظام وتتضمن تغذية راجعة هادفة.\n• الأسئلة صيغت بوضوح وتراعي المستويات المعرفية الثلاثية وجداول المواصفات.\n• رصد درجات أدوات التقويم المستمر متسق ومطابق للسجلات والبوابة التعليمية.';
-                                      const rawLines = notesText.split('\n').filter(l => l.trim().length > 0);
-                        const totalLines = Math.max(6, rawLines.length + 2);
-                                      const linesArray = Array.from({ length: totalLines }, (_, i) => rawLines[i] || '');
-
-                                      return linesArray.map((lineText, lineIdx) => (
-                                        <div 
-                                          key={`approved-ruled-line-${lineIdx}`}
-                                          className="flex items-center min-h-[34px] border-b border-dashed border-[#821315]/35 px-2 text-[14px] leading-relaxed"
-                                          style={{ minHeight: '34px' }}
-                                        >
-                                          {lineText ? (
-                                            <span className="font-bold text-slate-850 tracking-wide font-sans">{lineText}</span>
-                                          ) : (
-                                            <span className="text-slate-300 text-xs italic select-none">........................................................................................................................................................................................................................</span>
-                                          )}
-                                        </div>
-                                      ));
-                                    })()}
-                                  </div>
-
-                                  <div className="mt-3 pt-2 border-t border-[#821315]/30 flex items-center justify-between text-[13px] font-bold text-[#821315]">
-                                    <div>
-                                      <span>اسم وتوقيع الفاحص بخط اليد: </span>
-                                      <span className="font-mono text-slate-800 font-bold">{selectedApprovedForm.examinerSignedName || selectedApprovedForm.examinerName || '...........................................'}</span>
-                                    </div>
-                                    <div>
-                                      <span>التاريخ: </span>
-                                      <span className="font-mono text-slate-800 font-bold">{selectedApprovedForm.visitDate || '.... / .... / 2026م'}</span>
-                                    </div>
-                                  </div>
-                                </div>
-                              ) : (
-                                /* Grade 12 Benchmarks Table */
-                                <table className="w-full text-[16px] border-collapse text-right leading-normal font-sans" dir="rtl">
+                          {/* Row 2: Continuous Assessment Sample Tables (Grades 1-11) or Grade 12 Moderation Ledger */}
+                          {selectedApprovedForm.grade !== 'Grade 12' ? (
+                            <div className="flex flex-row gap-3.5 w-full my-1" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px', marginTop: formStyles?.tableMarginTop || '0px', marginBottom: formStyles?.tableMarginBottom || '0px' }}>
+                              
+                              {/* Right Table: Sample Students (6 rows) */}
+                              <div style={{ width: '42%', flex: '0 0 42%', boxSizing: 'border-box' }} className="flex flex-col">
+                                <table className="w-full text-right border-collapse border-2 border-black h-full" style={{ border: '2px solid black', width: '100%' }}>
                                   <thead>
-                                    <tr className="bg-slate-50 border-b-2 border-black text-[15px]">
-                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-right border-l-2 border-black">{language === 'ar' ? 'الصف' : 'Class'}</th>
-                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-center border-l-2 border-black">{language === 'ar' ? 'الأداة' : 'Tool'}</th>
-                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-center border-l-2 border-black">{language === 'ar' ? 'الحالة الفنية' : 'Verification Status'}</th>
-                                      <th className="py-2 px-3 text-slate-705 font-extrabold text-right">{language === 'ar' ? 'ملاحظات التدقيق والمطابقة' : 'Detailed Findings'}</th>
+                                    <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '2px solid black' }}>
+                                      <th className="py-2.5 px-2 border-l-2 border-black text-center text-[15px]" style={{ width: '15%', borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>م</th>
+                                      <th className="py-2.5 px-3 text-center text-[15px] font-black" style={{ backgroundColor: '#d1d5db' }}>اسم الطالب</th>
                                     </tr>
                                   </thead>
-                                  <tbody>
-                                    {selectedApprovedForm.observations && selectedApprovedForm.observations.length > 0 ? (
-                                      selectedApprovedForm.observations.map((obs, idx) => (
-                                        <tr key={`approved-view-obs-${obs.tool || 'obs'}-${idx}`} className="border-b-2 border-black last:border-0 hover:bg-slate-50/50">
-                                          <td className="py-2.5 px-3 text-slate-700 text-right font-normal border-l-2 border-black">{translateGrade(obs.gradeClass, language)}</td>
-                                          <td className="py-2.5 px-3 text-slate-705 text-center font-normal border-l-2 border-black whitespace-normal break-words">{obs.tool}</td>
-                                          <td className="py-2.5 px-3 text-center border-l-2 border-black">
-                                            <span className={`px-2.5 py-1 text-[13px] font-black rounded uppercase leading-none ${
-                                              obs.status === 'غير مطابق' || obs.status === 'Non-conforming' 
-                                                ? 'bg-rose-50 text-rose-800'
-                                                : 'bg-emerald-50 text-emerald-800'
-                                            }`}>
-                                              {obs.status || (language === 'ar' ? 'مستوفٍ ومطابق' : 'Approved')}
-                                            </span>
+                                  <tbody className="divide-y-2 divide-black">
+                                    {Array.from({ length: 6 }).map((_, idx) => {
+                                      const s = selectedApprovedForm.students && selectedApprovedForm.students[idx];
+                                      return (
+                                        <tr key={`approved-audit-sample-${idx}`} className="border-b-2 border-black last:border-b-0 h-[46px]" style={{ borderBottom: '2px solid black' }}>
+                                          <td className="py-2 px-2 text-center font-black text-[15px] text-black" style={{ borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
+                                            {idx + 1}
                                           </td>
-                                          <td className="py-2.5 px-3 text-slate-600 font-normal text-right whitespace-normal break-words leading-relaxed">{obs.notes || (language === 'ar' ? 'الأسئلة والمسافات مطابقة تماماً للمواصفة المعتمدة.' : 'Optimal assessment design.')}</td>
+                                          <td className="py-2 px-3 bg-white font-bold text-slate-900 text-[15px]">
+                                            {s ? (s.name || '') : ''}
+                                          </td>
                                         </tr>
-                                      ))
-                                    ) : (
-                                      <tr key="approved-obs-empty">
-                                        <td colSpan={4} className="py-2 text-center text-slate-400">{language === 'ar' ? 'لا توجد ملاحظات تدقيق.' : 'No findings.'}</td>
-                                      </tr>
-                                    )}
+                                      );
+                                    })}
                                   </tbody>
                                 </table>
+                              </div>
+
+                              {/* Left Table: Continuous Assessment Tools & Technical Notes (4 rows) */}
+                              <div style={{ width: '58%', flex: '0 0 58%', boxSizing: 'border-box' }} className="flex flex-col">
+                                <table className="w-full text-right border-collapse border-2 border-black h-full" style={{ border: '2px solid black', width: '100%' }}>
+                                  <thead>
+                                    <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '2px solid black' }}>
+                                      <th className="py-2 px-2 border-l-2 border-black text-center text-[14px] leading-tight font-black" style={{ width: '28%', borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
+                                        أدوات<br />التقويم<br />المستمر
+                                      </th>
+                                      <th className="py-2 px-3 text-center text-[15px] font-black" style={{ backgroundColor: '#d1d5db' }}>
+                                        الملاحظات الفنية وجوانب التطوير
+                                      </th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y-2 divide-black">
+                                    {Array.from({ length: 4 }).map((_, idx) => {
+                                      const defaultTools = ['اختبار قصير 1', 'عرض شفوي', 'سؤال قصير', 'واجب منزلي'];
+                                      const obs = selectedApprovedForm.observations && selectedApprovedForm.observations[idx];
+                                      const toolName = obs?.tool || defaultTools[idx];
+                                      const noteText = obs?.notes || '';
+                                      return (
+                                        <tr key={`approved-audit-obs-${idx}`} className="border-b-2 border-black last:border-b-0 h-[69px]" style={{ borderBottom: '2px solid black' }}>
+                                          <td className="py-2 px-2 text-center font-black text-[13px] text-slate-950 leading-snug" style={{ borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
+                                            {toolName}
+                                          </td>
+                                          <td className="py-2.5 px-3 bg-white text-slate-900 text-[13.5px] leading-relaxed align-top font-medium">
+                                            {noteText ? (
+                                              <div className="font-semibold text-slate-850 leading-relaxed whitespace-pre-wrap">{noteText}</div>
+                                            ) : (
+                                              <div className="h-full min-h-[48px] flex items-center justify-center text-slate-300 text-xs italic select-none"></div>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-12 gap-3.5" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px', marginTop: formStyles?.tableMarginTop || '0px', marginBottom: formStyles?.tableMarginBottom || '0px' }}>
+                              <div className="col-span-5 flex flex-col border-2 border-[#821315] rounded overflow-hidden bg-white" style={{ width: '41.5%', flex: '0 0 41.5%', boxSizing: 'border-box' }}>
+                                <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center">
+                                  {language === 'ar' ? 'جدول رصد ومطابقة عينة درجات الطلاب والمشغولات الدراسية' : 'Student Sample Grades Moderation Ledger'}
+                                </div>
+                                <table className="w-full text-right text-[16px] border-collapse leading-normal printable-grades-table" style={{ tableLayout: 'fixed', width: '100%' }}>
+                                  <thead>
+                                    <tr className="bg-[#821315]/5 text-[#821315] font-black text-[15px] border-b-2 border-[#821315]/45">
+                                      <th className="py-2 px-1.5 border-l border-[#821315]/45 text-center align-middle" style={{ width: '8%' }}>م</th>
+                                      <th className="py-2 px-3 border-l border-[#821315]/45 text-right align-middle" style={{ width: '44%' }}>{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
+                                      <th className="py-2 px-3 border-l border-[#821315]/45 align-middle" style={{ width: '24%' }}>الأداة</th>
+                                      <th className="py-2 px-2 border-l border-[#821315]/45 text-center align-middle" style={{ width: '24%' }}>{language === 'ar' ? 'الدرجة' : 'Grade'}</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-[#821315]/45 text-slate-700">
+                                    {(selectedApprovedForm.students || []).map((s, idx) => (
+                                      <tr key={`approved-school-student-${idx}`}>
+                                        <td className="py-2 px-1.5 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315]">{idx + 1}</td>
+                                        <td className="py-2.5 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words text-slate-800">{s.name || '---'}</td>
+                                        <td className="py-2.5 px-3 border-l border-[#821315]/45 whitespace-normal break-words font-bold text-slate-755">{s.level}</td>
+                                        <td className="py-2.5 px-1.5 border-l border-[#821315]/45 text-center font-mono font-black text-red-900 text-[15px] bg-red-50">{s.mark}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+
+                              <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between" style={{ width: '57%', flex: '0 0 57%', boxSizing: 'border-box' }}>
+                                <div className="bg-[#821315]/5 text-[#821315] px-3 py-1.5 text-[15px] font-black text-center border-b-2 border-[#821315]">
+                                  {language === 'ar' ? 'الملاحظات الفنية على أدوات التقويم المستمر - التقرير المعتمد للجنة' : 'Technical Observations / Audit Comments'}
+                                </div>
+                                <table className="w-full text-right text-[16px] border-collapse leading-normal flex-1" style={{ tableLayout: 'fixed', width: '100%' }}>
+                                  <thead>
+                                    <tr className="bg-slate-50 text-slate-600 font-black text-[15px] border-b-2 border-[#821315]/45">
+                                      <th className="py-2 px-3 border-l border-[#821315]/45 text-center" style={{ width: '20%' }}>الصف</th>
+                                      <th className="py-2 px-3 border-l border-[#821315]/45" style={{ width: '30%' }}>أداة التقويم</th>
+                                      <th className="py-2 px-3" style={{ width: '50%' }}>موجز الملاحظات الوزارية والفنية</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-[#821315]/45 text-slate-700">
+                                    {(selectedApprovedForm.observations || []).map((obs, idx) => (
+                                      <tr key={`approved-school-obs-${idx}`}>
+                                        <td className="py-2.5 px-3 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315]">{obs.gradeClass}</td>
+                                        <td className="py-2.5 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words">{obs.tool}</td>
+                                        <td className="py-2.5 px-3 text-slate-950 font-black text-right whitespace-normal break-words leading-relaxed text-[14px]">{obs.notes}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Row 4: Official Horizontal Bottom Footer Bar with Suggested Program and 3 Signatures */}
+                          <div className="border border-[#821315] rounded bg-white" style={{ marginTop: formStyles?.signaturesPaddingY || '16px' }}>
+                            <div className="flex w-full text-[16px]" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%' }}>
+                              
+                              {/* Professional development space */}
+                              <div className="p-3 text-right flex flex-col justify-center" style={{ width: selectedApprovedForm.grade === 'Grade 12' ? '45%' : '33%', flex: selectedApprovedForm.grade === 'Grade 12' ? '0 0 45%' : '0 0 33%', boxSizing: 'border-box' }}>
+                                <span className="font-extrabold text-[#821315] block text-[15px]">
+                                  {formStyles ? (formStyles.sectionDevelopmentAr || 'برامج الإنماء والتمكين المهني المقترحة بالتقرير:') : 'برامج الإنماء والتمكين المهني المقترحة بالتقرير:'}
+                                </span>
+                                <p className="text-slate-700 font-bold leading-relaxed text-[15px] mt-1">{selectedApprovedForm.suggestedDevelopment}</p>
+                              </div>
+
+                              {/* Teacher Signature Block */}
+                              {((!formStyles || formStyles.showTeacherSignature !== false) || selectedApprovedForm.grade === 'Grade 12') && (
+                                <div className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center" style={{ width: '21%', flex: '0 0 21%', boxSizing: 'border-box' }}>
+                                  <span className="font-extrabold text-[#821315] block text-[15px]">
+                                    {formStyles ? (formStyles.sectionTeacherSignAr || 'معلم المادة الموقع:') : 'معلم المادة الموقع:'}
+                                  </span>
+                                  <p className="text-slate-800 font-black text-[15px] mt-1 leading-tight">
+                                    {selectedApprovedForm.isTeacherSigned 
+                                      ? (selectedApprovedForm.teacherSignedName || '').replace(/[)(]/g, ' ')
+                                      : (selectedApprovedForm.teacherName || 'معلم المادة').replace(/[)(]/g, ' ')}
+                                  </p>
+                                  <div className="text-[13px] text-slate-400 mt-2 block w-full">
+                                    {selectedApprovedForm.isTeacherSigned ? (
+                                      <span className="font-mono text-sky-600 font-extrabold block w-full text-[12px]" style={{ direction: 'ltr' }}>
+                                        {selectedApprovedForm.teacherSignatureQrData}
+                                      </span>
+                                    ) : (
+                                      <span className="text-sky-600 font-bold block w-full text-[12px]">⏱️ بانتظار توقيع المعلم</span>
+                                    )}
+                                  </div>
+                                </div>
                               )}
-                            </div>
-                            {/* Digital Signatures area with stamped principal details */}
-                            <div className="col-span-4 border-2 border-black rounded overflow-hidden bg-[#faf9f5] flex flex-col justify-between p-3.5 text-right font-sans relative" dir="rtl">
-                               {selectedApprovedForm.isSigned && selectedApprovedForm.signatureStampUrl !== 'no_stamp' && (
-                                 <DraggableStamp 
-                                   src={getActiveStamp(selectedApprovedForm.schoolId || selectedApprovedForm.schoolName)} 
-                                   language={language}
-                                   className="left-3.5 bottom-12 w-20 h-20 opacity-95"
-                                   defaultOffsetX={formStyles?.stampOffsetX || 0}
-                                   defaultOffsetY={formStyles?.stampOffsetY || 0}
-                                   storageKey={`oman_moe_stamp_pos_approved_${selectedApprovedForm.id}`}
-                                 />
-                               )}
-                               <div>
-                                 <h5 className="text-[14px] font-black text-[#821315] uppercase leading-none mb-2">{language === 'ar' ? 'اعتماد ومحاذاة التوقيع' : 'Signed Authority'}</h5>
-                                 <p className="text-[12px] text-slate-400 font-mono leading-none">ID: {selectedApprovedForm.id.toUpperCase().substr(0, 10)}</p>
-                               </div>
 
-                               <div className="space-y-1.5 py-3 border-t-2 border-b-2 border-dashed border-black my-2">
-                                 <p className="text-[13px] text-slate-500 font-bold leading-none">{language === 'ar' ? 'مدير المدرسة المعتمد:' : 'Certified Principal:'}</p>
-                                 <p className="text-[15px] font-black text-slate-800 tracking-tight whitespace-normal break-words leading-tight">
-                                   {selectedApprovedForm.signedByPrincipalName || selectedApprovedForm.principalName}
-                                 </p>
-                                 <p className="text-[11px] text-slate-400 leading-none">
-                                   {formatSafeDate(selectedApprovedForm.signedAt || selectedApprovedForm.createdAt)}
-                                 </p>
-                               </div>
+                              {/* Examiner details */}
+                              <div className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center" style={{ width: '21%', flex: '0 0 21%', boxSizing: 'border-box' }}>
+                                <span className="font-extrabold text-[#821315] block text-[15px]">
+                                  {formStyles ? (formStyles.sectionAuditorSignAr || 'مشرف فحص ومطابقة المادة:') : 'مشرف فحص ومطابقة المادة:'}
+                                </span>
+                                <p className="text-slate-800 font-black text-[15px] mt-1 leading-tight">
+                                  {selectedApprovedForm.isExaminerSigned 
+                                    ? (selectedApprovedForm.examinerSignedName || '').replace(/[)(]/g, ' ').replace('مشرف ومدقق محافظة الوسطى', '').replace('مشرف ومدقق', '').trim()
+                                    : (selectedApprovedForm.examinerName || 'مشرف فحص ومطابقة المادة').replace(/[)(]/g, ' ').replace('مشرف ومدقق محافظة الوسطى', '').replace('مشرف ومدقق', '').trim()}
+                                </p>
+                                <div className="text-[13px] text-slate-400 mt-2 block w-full">
+                                  {selectedApprovedForm.isExaminerSigned ? (
+                                    <span className="font-mono text-violet-600 font-extrabold block w-full text-[12px]" style={{ direction: 'ltr' }}>
+                                      {selectedApprovedForm.examinerSignatureQrData}
+                                    </span>
+                                  ) : (
+                                    <span className="text-violet-600 font-bold block w-full text-[12px]">⏱️ بانتظار توقيع المفتش</span>
+                                  )}
+                                </div>
+                              </div>
 
-                               {/* Principal signature stamp - clean alphanumeric display underneath name */}
-                               <div className="flex flex-col items-start pt-1">
-                                 {selectedApprovedForm.signatureQrData ? (
-                                   <div className="w-full text-right">
-                                     <span className="text-[12px] font-bold text-emerald-800 leading-none block mb-1">{language === 'ar' ? 'توقيع إلكتروني معتمد ✓' : 'Verified E-Sign ✓'}</span>
-                                     <span 
-                                       className="font-mono text-[12.5px] text-[#821315] bg-amber-50 px-2 py-0.5 rounded font-black tracking-normal border-2 border-black shadow-xs select-all text-center inline-block whitespace-nowrap"
-                                       style={{ whiteSpace: 'nowrap' }}
-                                     >
-                                       {selectedApprovedForm.signatureQrData}
-                                     </span>
-                                   </div>
-                                 ) : (
-                                   <div className="w-full text-center py-2 bg-slate-100/50 rounded border-2 border-dashed border-black">
-                                     <span className="text-[12px] font-bold text-slate-400 animate-pulse">{language === 'ar' ? '⏱️ بانتظار التوقيع والاعتماد' : '⏱️ Awaiting Sign'}</span>
-                                   </div>
-                                 )}
-                               </div>
+                              {/* Principal and Stamp */}
+                              <div className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center relative" style={{ width: selectedApprovedForm.grade === 'Grade 12' ? '36%' : '28%', flex: selectedApprovedForm.grade === 'Grade 12' ? '0 0 36%' : '0 0 28%', boxSizing: 'border-box' }}>
+                                {selectedApprovedForm.isSigned && selectedApprovedForm.signatureStampUrl !== 'no_stamp' && (
+                                  <DraggableStamp 
+                                    src={getActiveStamp(selectedApprovedForm.schoolId || selectedApprovedForm.schoolName)} 
+                                    language={language}
+                                    className="right-4 top-1 w-24 h-24 opacity-95"
+                                    defaultOffsetX={formStyles?.stampOffsetX || 0}
+                                    defaultOffsetY={formStyles?.stampOffsetY || 0}
+                                    storageKey={`oman_moe_stamp_pos_approved_${selectedApprovedForm.id}`}
+                                  />
+                                )}
+                                <div className="font-extrabold text-[#821315] block text-[15px] relative z-10">
+                                  {formStyles ? (formStyles.sectionPrincipalSignAr || 'مدير المدرسة المصادق:') : 'مدير المدرسة المصادق:'}
+                                </div>
+                                <div className="text-slate-800 font-black text-[15px] mt-1.5 block w-full relative z-10">
+                                  {selectedApprovedForm.isSigned 
+                                    ? (selectedApprovedForm.signedByPrincipalName || '').replace(/[)(]/g, ' ')
+                                    : (selectedApprovedForm.principalName || 'بانتظار الاعتماد').replace(/[)(]/g, ' ')}
+                                </div>
+                                <div className="text-[13px] text-slate-400 mt-2 block w-full relative z-10 font-mono">
+                                  {selectedApprovedForm.isSigned ? (
+                                    <span className="font-mono text-[#821315] font-extrabold block w-full text-[12px]" style={{ direction: 'ltr' }}>
+                                      {selectedApprovedForm.signatureQrData}
+                                    </span>
+                                  ) : (
+                                    <span className="text-amber-600 font-bold block w-full text-[12px]">⏱️ بانتظار الاعتماد الرئاسي</span>
+                                  )}
+                                </div>
+                              </div>
+
                             </div>
+                          </div>
+
+                        </div>
+
+                        </div>
+
+                        {/* Sticky Batch Actions Footer inside #printable-approved-form */}
+                        <div 
+                          data-html2canvas-ignore="true"
+                          className="sticky bottom-3 z-30 mt-6 bg-gradient-to-r from-slate-900/95 via-slate-850/95 to-[#821315]/95 text-white backdrop-blur-md px-5 py-3.5 rounded-2xl shadow-2xl border-2 border-white/20 flex flex-wrap items-center justify-between gap-3 font-sans print:hidden animate-in fade-in slide-in-from-bottom-2 duration-200"
+                          dir="rtl"
+                        >
+                          {/* Selection Summary */}
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center border border-white/20 shadow-inner">
+                              <CheckSquare className="w-5 h-5 text-amber-300" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-bold text-slate-200">
+                                  {language === 'ar' ? 'الفرز والاعتماد الجماعي لعينات الطلاب:' : 'Bulk Student Sample Moderation:'}
+                                </span>
+                                <span className="px-2 py-0.5 rounded-full text-xs font-mono font-black bg-amber-400 text-slate-900 shadow-xs">
+                                  {selectedStudentIndices.length} / {selectedApprovedForm.students?.length || 0}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 font-medium mt-0.5">
+                                {selectedStudentIndices.length > 0 
+                                  ? (language === 'ar' 
+                                      ? `تم تحديد ${selectedStudentIndices.length} عينة جاهزة للاعتماد والتوثيق الفوري.` 
+                                      : `${selectedStudentIndices.length} samples selected for instant compliance verification.`)
+                                  : (language === 'ar' 
+                                      ? 'يمكنك تحديد عينات محددة أو الضغط لاعتماد كافة العينات دفعة واحدة.' 
+                                      : 'Select individual samples or click to bulk approve all samples at once.')}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Quick Selection & Sticky Bulk Approve Action */}
+                          <div className="flex items-center gap-2.5">
+                            {/* Select All / Deselect All Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!selectedApprovedForm.students) return;
+                                if (selectedStudentIndices.length === selectedApprovedForm.students.length) {
+                                  setSelectedStudentIndices([]);
+                                } else {
+                                  setSelectedStudentIndices(selectedApprovedForm.students.map((_, i) => i));
+                                }
+                              }}
+                              className="px-3.5 py-2 text-xs font-bold rounded-xl bg-white/10 hover:bg-white/20 active:scale-95 transition-all text-white border border-white/15 cursor-pointer flex items-center gap-1.5"
+                            >
+                              <CheckSquare className="w-3.5 h-3.5 text-slate-300" />
+                              <span>
+                                {selectedStudentIndices.length === (selectedApprovedForm.students?.length || 0)
+                                  ? (language === 'ar' ? 'إلغاء التحديد' : 'Deselect All')
+                                  : (language === 'ar' ? 'تحديد كافة العينات' : 'Select All')}
+                              </span>
+                            </button>
+
+                            {/* Sticky 'Bulk Approve' Button */}
+                            <button
+                              type="button"
+                              onClick={handleBulkApproveStudents}
+                              disabled={isBulkApprovingStudents || !selectedApprovedForm.students?.length}
+                              title={language === 'ar' ? 'اعتماد وتوثيق مطابقة العينات المحددة' : 'Bulk approve selected samples'}
+                              className="px-5 py-2.5 text-xs sm:text-sm font-black rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white shadow-lg hover:shadow-emerald-900/40 border border-emerald-400/50 cursor-pointer flex items-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                              {isBulkApprovingStudents ? (
+                                <>
+                                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                                  <span>{language === 'ar' ? 'جاري الاعتماد...' : 'Approving...'}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCheck className="w-4 h-4 text-emerald-100" />
+                                  <span>
+                                    {language === 'ar' 
+                                      ? (selectedStudentIndices.length > 0 
+                                          ? `اعتماد العينات المحددة (${selectedStudentIndices.length})` 
+                                          : 'اعتماد كافة العينات دفعة واحدة')
+                                      : (selectedStudentIndices.length > 0 
+                                          ? `Bulk Approve Selected (${selectedStudentIndices.length})` 
+                                          : 'Bulk Approve All Samples')}
+                                  </span>
+                                </>
+                              )}
+                            </button>
                           </div>
                         </div>
 
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -4250,6 +4726,7 @@ export default function App() {
                         a.schoolName === selectedModeratorSchool && 
                         (formatCleanTeacherName(a.teacherName, a.schoolEmail) === selectedModeratorTeacher || a.teacherName === selectedModeratorTeacher || a.schoolEmail === selectedModeratorTeacher)
                       )}
+                      archivedForms={archivedForms}
                       language={language}
                       onBack={() => {
                         setSelectedModeratorTeacher(null);
@@ -4257,6 +4734,18 @@ export default function App() {
                       }}
                       onStartAuditForm={(tName, schName, subjName, targetAss) => {
                         handleStartAuditFormFromChat(tName, schName, subjName, targetAss);
+                      }}
+                      onAdminForwardToPrincipal={async (archiveId, adminName) => {
+                        await transferArchivedFormToPrincipal(archiveId, adminName);
+                        await fetchArchivedFormsList();
+                      }}
+                      onPrincipalSign={async (archiveId, pName, qrData, stampUrl) => {
+                        await signArchivedForm(archiveId, pName, qrData, stampUrl);
+                        await fetchArchivedFormsList();
+                      }}
+                      onTeacherSignAndForward={async (archiveId, tName, qrData) => {
+                        await signArchivedTeacherForm(archiveId, tName, qrData);
+                        await fetchArchivedFormsList();
                       }}
                       onUploadNewFile={async (payload) => {
                         setActionLoading(true);
@@ -4572,11 +5061,12 @@ export default function App() {
                           </p>
                         </div>
 
-                        {/* Action buttons (Direct Landscape Print & Archive Integration) */}
+                        {/* Action buttons (Direct Landscape Print & Archive Integration - Strictly 1 Form Per Teacher) */}
                         {(() => {
-                          const isCurrentFormArchived = currentAssessment 
+                          const existingTeacherForm = getExistingTeacherForm(auditTeacherName);
+                          const isCurrentFormArchived = Boolean(existingTeacherForm) || (currentAssessment 
                             ? (archivedForms.some(f => f.assessmentId === currentAssessment.id) || archivedAssessmentIds.includes(currentAssessment.id))
-                            : archivedAssessmentIds.includes('temp_current');
+                            : archivedAssessmentIds.includes('temp_current'));
                           return (
                             <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-3 w-full sm:w-auto">
                               <button
@@ -4594,20 +5084,34 @@ export default function App() {
                                 {isCurrentFormArchived ? (
                                   <>
                                     <CheckCircle className="w-4 h-4 text-white animate-pulse" />
-                                    <span>{language === 'ar' ? 'تم توقيع المدقق وأُرسلت للمعلم' : 'Auditor Signed & Sent'}</span>
+                                    <span>
+                                      {language === 'ar'
+                                        ? 'تم إصدار وتوقيع استمارة هذا المعلم (استمارة واحدة فقط لكل معلم)'
+                                        : 'Teacher Form Already Signed (1 Form Per Teacher Limit)'}
+                                    </span>
                                   </>
                                 ) : isArchiving ? (
                                   <>
                                     <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full mr-1"></span>
-                                    <span>{language === 'ar' ? 'جاري تجهيز وتوقيع الاستمارة...' : 'Signing & Forwarding...'}</span>
+                                    <span>{language === 'ar' ? 'جاري توقيع وتحويل الاستمارة لمدير النظام...' : 'Signing & Forwarding to Admin...'}</span>
                                   </>
                                 ) : (
                                   <>
                                     <FileSpreadsheet className="w-4 h-4 text-white" />
-                                    <span>{language === 'ar' ? 'توقيع المدقق وإرسالها للمعلم' : 'Sign by Auditor & Send to Teacher'}</span>
+                                    <span>{language === 'ar' ? 'توقيع وتحويل لمدير النظام للاطلاع (استمارة واحدة للمعلم)' : 'Sign & Transfer to System Admin (1 Form/Teacher)'}</span>
                                   </>
                                 )}
                               </button>
+                              {existingTeacherForm && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedApprovedForm(existingTeacherForm)}
+                                  className="w-full sm:w-auto px-4 py-2.5 sm:py-4 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                  <span>{language === 'ar' ? 'استعراض استمارة المعلم الحالية' : 'View Existing Form'}</span>
+                                </button>
+                              )}
 
                               <button
                                 type="button"
@@ -5860,7 +6364,7 @@ export default function App() {
 
           {activeTab === 'results' && (
             <ResultsView
-              assessments={assessments}
+              assessments={userProfile?.role === 'moderator' ? filteredAssessments : assessments}
               language={language}
               userProfile={userProfile}
             />
@@ -5883,6 +6387,40 @@ export default function App() {
             />
           )}
 
+          {activeTab === 'tracker' && (
+            <FormTrackerView
+              archivedForms={archivedForms}
+              userProfile={userProfile}
+              language={language}
+              onRefresh={fetchArchivedFormsList}
+              onOpenInArchive={(form) => {
+                setTrackerSelectedFormId(form.id);
+                setSelectedApprovedForm(form);
+                if (userProfile?.role === 'school') {
+                  setPrincipalTab('archive');
+                }
+                setActiveTab('archive');
+              }}
+              onTransferToPrincipal={async (archiveId, adminName) => {
+                await transferArchivedFormToPrincipal(archiveId, adminName);
+                await fetchArchivedFormsList();
+              }}
+              onSignPrincipal={async (archiveId, pName, qrData, stampUrl) => {
+                await signArchivedForm(archiveId, pName, qrData, stampUrl);
+                await fetchArchivedFormsList();
+              }}
+              onSignTeacher={async (archiveId, tName, qrData) => {
+                await signArchivedTeacherForm(archiveId, tName, qrData);
+                await fetchArchivedFormsList();
+              }}
+              onSignExaminer={async (archiveId, eName, qrData, conformanceStatus, hasGradeRevisions) => {
+                await signArchivedExaminerForm(archiveId, eName, qrData, undefined, conformanceStatus, hasGradeRevisions);
+                await fetchArchivedFormsList();
+              }}
+              onSuccess={handleSuccess}
+            />
+          )}
+
           {activeTab === 'archive' && (
             <div className="max-w-7xl mx-auto space-y-6">
               <SchoolArchiveView
@@ -5900,9 +6438,15 @@ export default function App() {
                   await signArchivedExaminerForm(archiveId, eName, qrData, undefined, conformanceStatus, hasGradeRevisions);
                   await fetchArchivedFormsList();
                 }}
+                onTransferToPrincipal={async (archiveId, adminName) => {
+                  await transferArchivedFormToPrincipal(archiveId, adminName);
+                  await fetchArchivedFormsList();
+                }}
                 userProfile={userProfile}
                 onSuccess={handleSuccess}
-                certifiedOnly={true}
+                certifiedOnly={false}
+                initialSelectedFormId={trackerSelectedFormId}
+                onOpenTracker={() => setActiveTab('tracker')}
               />
             </div>
           )}

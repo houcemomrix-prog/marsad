@@ -16,8 +16,8 @@ import {
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { OMAN_WUSTA_SCHOOLS } from '../data/schoolsData';
 import { db, auth, OperationType, handleFirestoreError, storage } from './firebase';
-import { UserProfile, Assessment, ActivityLog, AssessmentStatus, ArchivedForm, FormDesignSettings, SchoolDoc, SchoolReport, TeacherNotification } from '../types';
-import { isSubjectMatch } from '../lib/translations';
+import { UserProfile, Assessment, ActivityLog, AssessmentStatus, ArchivedForm, FormDesignSettings, SchoolDoc, SchoolReport, TeacherNotification, StudentMark } from '../types';
+import { isSubjectMatch, isUniversalSubject } from '../lib/translations';
 
 const PDF_MEMORY_CACHE = new Map<string, string>();
 
@@ -88,7 +88,7 @@ export function subscribeToUserProfile(uid: string, onUpdate: (profile: UserProf
 // Check if running in Sandbox Mode
 export function isSandboxActive(): boolean {
   const stored = localStorage.getItem('oman_moe_sandbox_active');
-  return stored !== 'false'; // Defaults to true for instant preview in sandboxed environments
+  return stored === 'true'; // Default to live Firestore for multi-user synchronization
 }
 
 export function setSandboxActive(active: boolean) {
@@ -136,8 +136,8 @@ const INITIAL_SANDBOX_USERS: Record<string, UserProfile> = {
     name: 'أ. سالم الحارثي',
     email: 'moderator@moe.om',
     role: 'moderator',
-    jobTitle: 'مشرف ومدقق تربوي',
-    subject: 'Mathematics',
+    jobTitle: 'فاحص ومدقق مادة العلوم العامة',
+    subject: 'Science',
     directorate: LINKED_EXPERIMENT_GOVERNORATE_AR,
     wilaya: 'duqm',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 10).toISOString()
@@ -170,26 +170,32 @@ export function purgeRecentExperimentPapers(): void {
 }
 
 function getSandboxData<T>(key: string, initial: T): T {
-  let dataStr = localStorage.getItem(key);
+  const dataStr = localStorage.getItem(key);
   if (!dataStr) {
     localStorage.setItem(key, JSON.stringify(initial));
     return initial;
   }
   try {
-    if (key === SANDBOX_ASSESSMENTS_KEY || key === SANDBOX_ARCHIVED_FORMS_KEY || key === SANDBOX_LOGS_KEY || key === SANDBOX_REPORTS_KEY) {
-      const resetKey = 'oman_moe_sandbox_clean_experiments_linked_v15';
-      if (!localStorage.getItem(resetKey)) {
-        localStorage.setItem(resetKey, 'true');
-        localStorage.setItem(SANDBOX_ASSESSMENTS_KEY, JSON.stringify([]));
-        localStorage.setItem(SANDBOX_LOGS_KEY, JSON.stringify([]));
-        localStorage.setItem(SANDBOX_ARCHIVED_FORMS_KEY, JSON.stringify([]));
-        localStorage.setItem(SANDBOX_REPORTS_KEY, JSON.stringify([]));
-        localStorage.setItem(SANDBOX_USERS_KEY, JSON.stringify(INITIAL_SANDBOX_USERS));
-        return [] as unknown as T;
+    const parsed = JSON.parse(dataStr);
+    if (key === SANDBOX_ARCHIVED_FORMS_KEY && Array.isArray(parsed)) {
+      // Ensure initial seed forms exist if localStorage was previously emptied, while preserving any updates
+      const map = new Map<string, any>();
+      if (Array.isArray(initial)) {
+        for (const item of initial) {
+          if (item && item.id) map.set(item.id, item);
+        }
       }
+      for (const item of parsed) {
+        if (item && item.id) {
+          map.set(item.id, item);
+        }
+      }
+      const merged = Array.from(map.values());
+      if (merged.length !== parsed.length) {
+        localStorage.setItem(key, JSON.stringify(merged));
+      }
+      return merged as unknown as T;
     }
-
-    let parsed = JSON.parse(dataStr);
     if (key === SANDBOX_USERS_KEY && parsed) {
       // Always enforce the linked experiment accounts
       parsed['demo-school-1'] = {
@@ -212,9 +218,25 @@ function getSandboxData<T>(key: string, initial: T): T {
   }
 }
 
+function notifyArchivedFormsSync() {
+  try {
+    window.dispatchEvent(new CustomEvent('oman_moe_archived_forms_updated'));
+    if (typeof BroadcastChannel !== 'undefined') {
+      const bc = new BroadcastChannel('oman_moe_sync_channel');
+      bc.postMessage({ type: 'ARCHIVED_FORMS_UPDATED', timestamp: Date.now() });
+      bc.close();
+    }
+  } catch (err) {
+    // Ignore broadcast errors
+  }
+}
+
 function setSandboxData<T>(key: string, value: T) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
+    if (key === SANDBOX_ARCHIVED_FORMS_KEY) {
+      notifyArchivedFormsSync();
+    }
   } catch (err) {
     console.warn(`Failed to write ${key} to localStorage:`, err);
   }
@@ -436,6 +458,8 @@ export async function uploadAssessment(assessment: Omit<Assessment, 'id' | 'crea
         schoolId: assessment.schoolId,
         schoolName: assessment.schoolName,
         schoolEmail: assessment.schoolEmail,
+        teacherName: assessment.teacherName || '',
+        workflowStage: assessment.workflowStage || 'teacher_submitted',
         moderatorId: null,
         moderatorName: null,
         feedback: '',
@@ -554,9 +578,13 @@ export async function getAssessments(userProfile: UserProfile): Promise<Assessme
     }
     
     if (userProfile.role === 'moderator') {
-      const isUniversal = (s?: string) => !s || s === 'all' || s === 'عام' || s === 'جميع المواد' || s === 'عام / جميع المواد';
-      const matched = assessments.filter(a => isSubjectMatch(userProfile.subject, a.subject) || isUniversal(userProfile.subject));
-      return (matched.length > 0 ? matched : assessments).sort((a,b) => b.createdAt.localeCompare(a.createdAt));
+      const modSubj = userProfile.subject || '';
+      const matched = assessments.filter(a => {
+        if (!a.subject || !modSubj) return false;
+        if (isUniversalSubject(a.subject)) return false;
+        return isSubjectMatch(modSubj, a.subject);
+      });
+      return matched.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
     }
     
     return assessments.sort((a,b) => b.createdAt.localeCompare(a.createdAt));
@@ -623,6 +651,12 @@ export async function getAssessments(userProfile: UserProfile): Promise<Assessme
         pdfName: data.pdfName || null,
         pdfSize: data.pdfSize || null,
         pdfData: pdfDataVal,
+        teacherName: data.teacherName || null,
+        workflowStage: data.workflowStage || null,
+        principalApprovedBy: data.principalApprovedBy || null,
+        principalApprovedAt: data.principalApprovedAt || null,
+        readByExaminer: data.readByExaminer || null,
+        examinerReadReceiptLogged: data.examinerReadReceiptLogged || false,
         createdAt: createdAtStr,
         updatedAt: updatedAtStr
       });
@@ -643,9 +677,13 @@ export async function getAssessments(userProfile: UserProfile): Promise<Assessme
     }
 
     if (userProfile.role === 'moderator') {
-      const isUniversal = (s?: string) => !s || s === 'all' || s === 'عام' || s === 'جميع المواد' || s === 'عام / جميع المواد';
-      const matched = results.filter(a => isSubjectMatch(userProfile.subject, a.subject) || isUniversal(userProfile.subject));
-      return (matched.length > 0 ? matched : results).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      const modSubj = userProfile.subject || '';
+      const matched = results.filter(a => {
+        if (!a.subject || !modSubj) return false;
+        if (isUniversalSubject(a.subject)) return false;
+        return isSubjectMatch(modSubj, a.subject);
+      });
+      return matched.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
 
     // Sort client-side to avoid composite indexing errors in Firebase
@@ -936,9 +974,8 @@ const INITIAL_SANDBOX_ARCHIVED_FORMS: ArchivedForm[] = [
     examinerSignatureStampUrl: 'Examiner verified electronically',
     conformanceStatus: 'conforming',
     hasGradeRevisions: false,
-    // Step 2: Awaiting Teacher Signature
+    workflowStage: 'examiner_submitted_to_admin',
     isTeacherSigned: false,
-    // Step 3: Awaiting Principal Signature & Stamp
     isSigned: false,
     createdAt: '2025-02-15T09:30:00.000Z',
     updatedAt: '2025-02-15T09:30:00.000Z'
@@ -980,13 +1017,10 @@ const INITIAL_SANDBOX_ARCHIVED_FORMS: ArchivedForm[] = [
     examinerSignatureStampUrl: 'Examiner verified electronically',
     conformanceStatus: 'conforming',
     hasGradeRevisions: false,
-    // Step 2: Teacher signed
-    isTeacherSigned: true,
-    teacherSignedAt: '2025-02-15T11:45:00.000Z',
-    teacherSignedName: 'أ. منى بنت عبدالله الوهيبية',
-    teacherSignatureQrData: 'OM-TCH-8B22-4P67',
-    teacherSignatureStampUrl: 'Teacher verified electronically',
-    // Step 3: Awaiting Principal Signature & Stamp
+    workflowStage: 'admin_transferred_to_principal',
+    adminReviewedBy: 'أ. حسام عمري (مدير النظام)',
+    adminReviewedAt: '2025-02-14T11:00:00.000Z',
+    isTeacherSigned: false,
     isSigned: false,
     createdAt: '2025-02-14T10:15:00.000Z',
     updatedAt: '2025-02-15T11:45:00.000Z'
@@ -1027,13 +1061,12 @@ const INITIAL_SANDBOX_ARCHIVED_FORMS: ArchivedForm[] = [
     examinerSignatureStampUrl: 'Examiner verified electronically',
     conformanceStatus: 'conforming',
     hasGradeRevisions: false,
-    // Step 2: Teacher signed
+    workflowStage: 'completed',
     isTeacherSigned: true,
     teacherSignedAt: '2025-02-11T12:10:00.000Z',
     teacherSignedName: 'أ. فاطمة بنت حميد المهرية',
     teacherSignatureQrData: 'OM-TCH-4D88-7Q29',
     teacherSignatureStampUrl: 'Teacher verified electronically',
-    // Step 3: Principal signed and officially stamped
     isSigned: true,
     signedAt: '2025-02-12T13:40:00.000Z',
     signedByPrincipalName: 'أ. حمود بن عامر الحرسوسي',
@@ -1044,32 +1077,58 @@ const INITIAL_SANDBOX_ARCHIVED_FORMS: ArchivedForm[] = [
   }
 ];
 
+function normalizeTeacherKeyLocal(name?: string, fileNo?: string): string {
+  const raw = (name || fileNo || 'unknown_teacher')
+    .replace(/\s*\(.*?\)\s*/g, ' ')
+    .replace(/^أ\.\s*|^د\.\s*/g, '')
+    .trim()
+    .toLowerCase();
+  return raw || 'unknown_teacher';
+}
+
 export async function archiveForm(archive: Omit<ArchivedForm, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-  if (isSandboxActive()) {
-    const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
-    const newId = 'archive_' + Math.random().toString(36).substr(2, 9);
-    const newArchive: ArchivedForm = {
-      ...archive,
-      id: newId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    };
-    archives.push(newArchive);
-    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
-    return newId;
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const targetTeacherKey = normalizeTeacherKeyLocal(archive.teacherName, archive.teacherFileNo);
+
+  // Enforce strict one-form-per-teacher rule
+  const existingForm = archives.find((f) => {
+    const fTeacherKey = normalizeTeacherKeyLocal(f.teacherName, f.teacherFileNo);
+    if (targetTeacherKey !== 'unknown_teacher' && fTeacherKey === targetTeacherKey) {
+      return true;
+    }
+    if (archive.assessmentId && f.assessmentId === archive.assessmentId) {
+      return true;
+    }
+    return false;
+  });
+
+  if (existingForm) {
+    notifyArchivedFormsSync();
+    return existingForm.id;
   }
 
-  const path = 'archived_forms';
+  const newId = 'archive_' + Math.random().toString(36).substr(2, 9);
+  const newArchive: ArchivedForm = {
+    ...archive,
+    id: newId,
+    createdAt: nowIso,
+    updatedAt: nowIso
+  };
+  archives.push(newArchive);
+  setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+
   try {
-    const docRef = await addDoc(collection(db, 'archived_forms'), {
-      ...archive,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-    return docRef.id;
+    await setDoc(doc(db, 'archived_forms', newId), {
+      ...newArchive,
+      createdAt: nowIso,
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
+    return newId;
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
-    return '';
+    console.warn("Firestore archiveForm write warning (persisted locally):", error);
+    return newId;
   }
 }
 
@@ -1101,167 +1160,324 @@ function isSameSchoolLocal(school1?: string, school2?: string): boolean {
   return s1.includes(s2) || s2.includes(s1);
 }
 
+function getWorkflowStageRank(form: ArchivedForm): number {
+  const normalized = normalizeWorkflowStage(form);
+  if (normalized.workflowStage === 'completed' || (normalized.isSigned && normalized.isTeacherSigned)) return 4;
+  if (normalized.workflowStage === 'principal_signed_transferred_to_teacher' || normalized.isSigned) return 3;
+  if (normalized.workflowStage === 'admin_transferred_to_principal' || normalized.adminReviewedBy || normalized.adminReviewedAt) return 2;
+  if (normalized.workflowStage === 'examiner_submitted_to_admin' || normalized.isExaminerSigned) return 1;
+  return 0;
+}
+
+function normalizeWorkflowStage(form: ArchivedForm): ArchivedForm {
+  let stage = form.workflowStage;
+  if (form.isSigned && form.isTeacherSigned) {
+    stage = 'completed';
+  } else if (form.isSigned) {
+    stage = 'principal_signed_transferred_to_teacher';
+  } else if (stage === 'admin_transferred_to_principal' || form.adminReviewedBy || form.adminReviewedAt) {
+    stage = 'admin_transferred_to_principal';
+  } else if (!stage || stage === ('admin_transferred_to_teacher' as any)) {
+    stage = 'examiner_submitted_to_admin';
+  }
+  return { ...form, workflowStage: stage };
+}
+
+function pickMoreAdvancedForm(a: ArchivedForm, b: ArchivedForm): ArchivedForm {
+  const normA = normalizeWorkflowStage(a);
+  const normB = normalizeWorkflowStage(b);
+  const rankA = getWorkflowStageRank(normA);
+  const rankB = getWorkflowStageRank(normB);
+  if (rankB > rankA) return normB;
+  if (rankA > rankB) return normA;
+  const timeA = new Date(normA.updatedAt || normA.createdAt || 0).getTime();
+  const timeB = new Date(normB.updatedAt || normB.createdAt || 0).getTime();
+  return timeB >= timeA ? normB : normA;
+}
+
 function deduplicateFormsByTeacher(forms: ArchivedForm[]): ArchivedForm[] {
+  const normalizedForms = forms.map(normalizeWorkflowStage);
   const map = new Map<string, ArchivedForm>();
-  for (const form of forms) {
-    const teacherKey = (form.teacherName || form.teacherFileNo || 'unknown_teacher').trim().toLowerCase();
+  for (const form of normalizedForms) {
+    const rawTeacher = (form.teacherName || form.teacherFileNo || 'unknown_teacher')
+      .replace(/\s*\(.*?\)\s*/g, ' ')
+      .replace(/^أ\.\s*|^د\.\s*/g, '')
+      .trim()
+      .toLowerCase();
+    const teacherKey = rawTeacher || 'unknown_teacher';
     const schoolKey = (form.schoolName || 'unknown_school').trim().toLowerCase();
     const key = `${schoolKey}_${teacherKey}`;
     if (!map.has(key)) {
       map.set(key, form);
     } else {
       const existing = map.get(key)!;
-      if ((form.isSigned || form.isExaminerSigned) && !(existing.isSigned || existing.isExaminerSigned)) {
-        map.set(key, form);
-      } else if (form.createdAt > existing.createdAt) {
-        map.set(key, form);
+      if (existing.id === form.id) {
+        map.set(key, pickMoreAdvancedForm(existing, form));
+      } else {
+        const existingCreated = new Date(existing.createdAt || 0).getTime();
+        const formCreated = new Date(form.createdAt || 0).getTime();
+        map.set(key, formCreated >= existingCreated ? form : existing);
       }
     }
   }
   return Array.from(map.values()).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
+function mapFirestoreDocToArchivedForm(docSnap: { id: string; data: () => any }): ArchivedForm {
+  const data = docSnap.data() as any;
+  let createdAtStr = new Date().toISOString();
+  let updatedAtStr = new Date().toISOString();
+
+  if (data.createdAt && typeof data.createdAt.toDate === 'function') {
+    createdAtStr = data.createdAt.toDate().toISOString();
+  } else if (data.createdAt) {
+    createdAtStr = new Date(data.createdAt).toISOString();
+  }
+
+  if (data.updatedAt && typeof data.updatedAt.toDate === 'function') {
+    updatedAtStr = data.updatedAt.toDate().toISOString();
+  } else if (data.updatedAt) {
+    updatedAtStr = new Date(data.updatedAt).toISOString();
+  }
+
+  let signedAtStr = data.signedAt;
+  if (signedAtStr && typeof signedAtStr.toDate === 'function') {
+    signedAtStr = signedAtStr.toDate().toISOString();
+  }
+  let teacherSignedAtStr = data.teacherSignedAt;
+  if (teacherSignedAtStr && typeof teacherSignedAtStr.toDate === 'function') {
+    teacherSignedAtStr = teacherSignedAtStr.toDate().toISOString();
+  }
+  let examinerSignedAtStr = data.examinerSignedAt;
+  if (examinerSignedAtStr && typeof examinerSignedAtStr.toDate === 'function') {
+    examinerSignedAtStr = examinerSignedAtStr.toDate().toISOString();
+  }
+  let adminReviewedAtStr = data.adminReviewedAt || null;
+  if (adminReviewedAtStr && typeof adminReviewedAtStr.toDate === 'function') {
+    adminReviewedAtStr = adminReviewedAtStr.toDate().toISOString();
+  }
+
+  return normalizeWorkflowStage({
+    id: docSnap.id,
+    assessmentId: data.assessmentId,
+    assessmentTitle: data.assessmentTitle,
+    assessmentType: data.assessmentType,
+    grade: data.grade,
+    subject: data.subject,
+    schoolName: data.schoolName,
+    schoolId: data.schoolId,
+    teacherName: data.teacherName,
+    teacherFileNo: data.teacherFileNo,
+    appointmentYear: data.appointmentYear,
+    directorate: data.directorate,
+    visitDate: data.visitDate,
+    subjectName: data.subjectName,
+    academicYear: data.academicYear,
+    semester: data.semester,
+    suggestedDevelopment: data.suggestedDevelopment,
+    examinerName: data.examinerName,
+    principalName: data.principalName,
+    students: data.students || [],
+    observations: data.observations || [],
+    isSigned: data.isSigned || false,
+    signedAt: signedAtStr,
+    signedByPrincipalName: data.signedByPrincipalName,
+    signatureQrData: data.signatureQrData,
+    signatureStampUrl: data.signatureStampUrl,
+    isTeacherSigned: data.isTeacherSigned || false,
+    teacherSignedAt: teacherSignedAtStr,
+    teacherSignedName: data.teacherSignedName,
+    teacherSignatureQrData: data.teacherSignatureQrData,
+    teacherSignatureStampUrl: data.teacherSignatureStampUrl,
+    isExaminerSigned: data.isExaminerSigned || false,
+    examinerSignedAt: examinerSignedAtStr,
+    examinerSignedName: data.examinerSignedName,
+    examinerSignatureQrData: data.examinerSignatureQrData,
+    examinerSignatureStampUrl: data.examinerSignatureStampUrl,
+    conformanceStatus: data.conformanceStatus,
+    hasGradeRevisions: data.hasGradeRevisions,
+    workflowStage: data.workflowStage,
+    adminReviewedAt: adminReviewedAtStr,
+    adminReviewedBy: data.adminReviewedBy || null,
+    createdAt: createdAtStr,
+    updatedAt: updatedAtStr
+  });
+}
+
+function mergeLocalAndRemoteForms(remoteForms: ArchivedForm[]): { merged: ArchivedForm[]; toSyncToFirestore: ArchivedForm[] } {
+  const demoSeedIds = new Set(INITIAL_SANDBOX_ARCHIVED_FORMS.map(s => s.id));
+  const localForms = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, []);
+  const byId = new Map<string, ArchivedForm>();
+  const remoteById = new Map<string, ArchivedForm>();
+
+  for (const remote of remoteForms) {
+    if (!remote || !remote.id || demoSeedIds.has(remote.id)) continue;
+    const normRemote = normalizeWorkflowStage(remote);
+    remoteById.set(remote.id, normRemote);
+    byId.set(remote.id, normRemote);
+  }
+
+  for (const local of localForms) {
+    if (!local || !local.id || demoSeedIds.has(local.id)) continue;
+    const existing = byId.get(local.id);
+    if (existing) {
+      byId.set(local.id, pickMoreAdvancedForm(existing, local));
+    } else {
+      byId.set(local.id, normalizeWorkflowStage(local));
+    }
+  }
+
+  if (byId.size === 0) {
+    for (const seed of INITIAL_SANDBOX_ARCHIVED_FORMS) {
+      byId.set(seed.id, normalizeWorkflowStage(seed));
+    }
+  }
+
+  const merged = Array.from(byId.values());
+  const toSyncToFirestore: ArchivedForm[] = [];
+
+  for (const item of merged) {
+    if (demoSeedIds.has(item.id)) continue;
+    const remoteItem = remoteById.get(item.id);
+    if (!remoteItem || getWorkflowStageRank(item) > getWorkflowStageRank(remoteItem)) {
+      toSyncToFirestore.push(item);
+    }
+  }
+
+  try {
+    localStorage.setItem(SANDBOX_ARCHIVED_FORMS_KEY, JSON.stringify(merged));
+  } catch (e) {
+    // Ignore storage quota errors
+  }
+
+  return { merged, toSyncToFirestore };
+}
+
 export async function getArchivedForms(userProfileOrId?: UserProfile | string): Promise<ArchivedForm[]> {
   const isProfile = userProfileOrId && typeof userProfileOrId === 'object' && 'role' in userProfileOrId;
-  const profileDetails = isProfile ? (userProfileOrId as UserProfile) : null;
   const passedId = !isProfile && typeof userProfileOrId === 'string' ? userProfileOrId : undefined;
 
   if (isSandboxActive()) {
     const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
-    if (profileDetails && profileDetails.role === 'school') {
-      if (profileDetails.roleType === 'administrative') {
-        const filtered = archives.filter(a => 
-          a.schoolId === profileDetails.uid || 
-          isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        );
-        return deduplicateFormsByTeacher(filtered);
-      }
-      if (profileDetails.roleType === 'teacher') {
-        const filtered = archives.filter(a => 
-          a.schoolId === profileDetails.uid ||
-          (a.teacherFileNo && profileDetails.phoneNumber && a.teacherFileNo === profileDetails.phoneNumber) ||
-          (profileDetails.name && a.teacherName && (a.teacherName.trim().includes(profileDetails.name.trim()) || profileDetails.name.trim().includes(a.teacherName.trim()))) ||
-          isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        );
-        return deduplicateFormsByTeacher(filtered);
-      }
-      const filtered = archives.filter(a => a.schoolId === profileDetails.uid);
-      return deduplicateFormsByTeacher(filtered);
-    } else if (profileDetails && profileDetails.role === 'moderator') {
-      const filtered = archives.filter(a => 
-        isSubjectMatch(profileDetails.subject, a.subject || a.subjectName)
-      );
-      return deduplicateFormsByTeacher(filtered);
-    } else if (passedId) {
-      const filtered = archives.filter(a => a.schoolId === passedId);
-      return deduplicateFormsByTeacher(filtered);
+    if (passedId) {
+      return deduplicateFormsByTeacher(archives.filter(a => a.schoolId === passedId));
     }
     return deduplicateFormsByTeacher(archives);
   }
 
-  const path = 'archived_forms';
   try {
-    let q = query(collection(db, 'archived_forms'));
-    if (passedId) {
-      q = query(collection(db, 'archived_forms'), where('schoolId', '==', passedId));
-    }
+    const q = passedId
+      ? query(collection(db, 'archived_forms'), where('schoolId', '==', passedId))
+      : query(collection(db, 'archived_forms'));
     const querySnapshot = await getDocs(q);
-    const results: ArchivedForm[] = [];
+    const remoteResults: ArchivedForm[] = [];
 
-    querySnapshot.forEach((doc) => {
-      const data = doc.data() as any;
-      let createdAtStr = new Date().toISOString();
-      let updatedAtStr = new Date().toISOString();
-
-      if (data.createdAt && typeof data.createdAt.toDate === 'function') {
-        createdAtStr = data.createdAt.toDate().toISOString();
-      } else if (data.createdAt) {
-        createdAtStr = new Date(data.createdAt).toISOString();
-      }
-
-      if (data.updatedAt && typeof data.updatedAt.toDate === 'function') {
-        updatedAtStr = data.updatedAt.toDate().toISOString();
-      } else if (data.updatedAt) {
-        updatedAtStr = new Date(data.updatedAt).toISOString();
-      }
-
-      results.push({
-        id: doc.id,
-        assessmentId: data.assessmentId,
-        assessmentTitle: data.assessmentTitle,
-        assessmentType: data.assessmentType,
-        grade: data.grade,
-        subject: data.subject,
-        schoolName: data.schoolName,
-        schoolId: data.schoolId,
-        teacherName: data.teacherName,
-        teacherFileNo: data.teacherFileNo,
-        appointmentYear: data.appointmentYear,
-        directorate: data.directorate,
-        visitDate: data.visitDate,
-        subjectName: data.subjectName,
-        academicYear: data.academicYear,
-        semester: data.semester,
-        suggestedDevelopment: data.suggestedDevelopment,
-        examinerName: data.examinerName,
-        principalName: data.principalName,
-        students: data.students || [],
-        observations: data.observations || [],
-        isSigned: data.isSigned || false,
-        signedAt: data.signedAt,
-        signedByPrincipalName: data.signedByPrincipalName,
-        signatureQrData: data.signatureQrData,
-        signatureStampUrl: data.signatureStampUrl,
-        isTeacherSigned: data.isTeacherSigned || false,
-        teacherSignedAt: data.teacherSignedAt,
-        teacherSignedName: data.teacherSignedName,
-        teacherSignatureQrData: data.teacherSignatureQrData,
-        teacherSignatureStampUrl: data.teacherSignatureStampUrl,
-        isExaminerSigned: data.isExaminerSigned || false,
-        examinerSignedAt: data.examinerSignedAt,
-        examinerSignedName: data.examinerSignedName,
-        examinerSignatureQrData: data.examinerSignatureQrData,
-        examinerSignatureStampUrl: data.examinerSignatureStampUrl,
-        conformanceStatus: data.conformanceStatus,
-        hasGradeRevisions: data.hasGradeRevisions,
-        createdAt: createdAtStr,
-        updatedAt: updatedAtStr
-      });
+    querySnapshot.forEach((docSnap) => {
+      remoteResults.push(mapFirestoreDocToArchivedForm(docSnap));
     });
 
-    if (profileDetails && profileDetails.role === 'school') {
-      if (profileDetails.roleType === 'administrative') {
-        const filtered = results.filter(a => 
-          a.schoolId === profileDetails.uid || 
-          isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        );
-        return deduplicateFormsByTeacher(filtered);
-      }
-      if (profileDetails.roleType === 'teacher') {
-        const filtered = results.filter(a => 
-          a.schoolId === profileDetails.uid ||
-          (a.teacherFileNo && profileDetails.phoneNumber && a.teacherFileNo === profileDetails.phoneNumber) ||
-          (profileDetails.name && a.teacherName && (a.teacherName.trim().includes(profileDetails.name.trim()) || profileDetails.name.trim().includes(a.teacherName.trim()))) ||
-          isSameSchoolLocal(a.schoolName, profileDetails.schoolName)
-        );
-        return deduplicateFormsByTeacher(filtered);
-      }
-      const filtered = results.filter(a => a.schoolId === profileDetails.uid);
-      return deduplicateFormsByTeacher(filtered);
+    const { merged, toSyncToFirestore } = mergeLocalAndRemoteForms(remoteResults);
+
+    // Asynchronously push any missing seed or more-advanced local forms to Firestore
+    if (toSyncToFirestore.length > 0) {
+      Promise.allSettled(
+        toSyncToFirestore.map((form) =>
+          setDoc(doc(db, 'archived_forms', form.id), JSON.parse(JSON.stringify(form)), { merge: true })
+        )
+      ).catch(() => {});
     }
 
-    if (profileDetails && profileDetails.role === 'moderator') {
-      const filtered = results.filter(a => 
-        isSubjectMatch(profileDetails.subject, a.subject || a.subjectName)
-      );
-      return deduplicateFormsByTeacher(filtered);
+    if (passedId) {
+      return deduplicateFormsByTeacher(merged.filter(a => a.schoolId === passedId));
     }
-
-    return deduplicateFormsByTeacher(results);
+    return deduplicateFormsByTeacher(merged);
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, path);
-    return [];
+    console.warn("Firestore getArchivedForms fallback to local cache:", error);
+    const localFallback = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+    return deduplicateFormsByTeacher(localFallback);
   }
+}
+
+export function subscribeToArchivedForms(
+  _userProfile: UserProfile | null,
+  onUpdate: (forms: ArchivedForm[]) => void
+): () => void {
+  let latestRemoteForms: ArchivedForm[] = [];
+
+  const emitMerged = () => {
+    const { merged } = mergeLocalAndRemoteForms(latestRemoteForms);
+    onUpdate(deduplicateFormsByTeacher(merged));
+  };
+
+  // Immediate emit from local cache so UI is never blank
+  emitMerged();
+
+  const handleLocalSync = () => {
+    emitMerged();
+  };
+
+  const handleStorageEvent = (e: StorageEvent) => {
+    if (e.key === SANDBOX_ARCHIVED_FORMS_KEY) {
+      emitMerged();
+    }
+  };
+
+  window.addEventListener('oman_moe_archived_forms_updated', handleLocalSync);
+  window.addEventListener('storage', handleStorageEvent);
+
+  let bc: BroadcastChannel | null = null;
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      bc = new BroadcastChannel('oman_moe_sync_channel');
+      bc.onmessage = () => {
+        emitMerged();
+      };
+    } catch (e) {
+      bc = null;
+    }
+  }
+
+  let unsubFirestore: (() => void) | null = null;
+  if (!isSandboxActive()) {
+    try {
+      const q = query(collection(db, 'archived_forms'));
+      unsubFirestore = onSnapshot(
+        q,
+        (snapshot) => {
+          const remote: ArchivedForm[] = [];
+          snapshot.forEach((docSnap) => {
+            remote.push(mapFirestoreDocToArchivedForm(docSnap));
+          });
+          latestRemoteForms = remote;
+          const { merged, toSyncToFirestore } = mergeLocalAndRemoteForms(remote);
+          if (toSyncToFirestore.length > 0) {
+            Promise.allSettled(
+              toSyncToFirestore.map((form) =>
+                setDoc(doc(db, 'archived_forms', form.id), JSON.parse(JSON.stringify(form)), { merge: true })
+              )
+            ).catch(() => {});
+          }
+          onUpdate(deduplicateFormsByTeacher(merged));
+        },
+        (err) => {
+          console.warn("Firestore archived_forms real-time listener error:", err);
+        }
+      );
+    } catch (e) {
+      console.warn("Could not attach Firestore archived_forms listener:", e);
+    }
+  }
+
+  return () => {
+    window.removeEventListener('oman_moe_archived_forms_updated', handleLocalSync);
+    window.removeEventListener('storage', handleStorageEvent);
+    if (bc) {
+      bc.close();
+    }
+    if (unsubFirestore) {
+      unsubFirestore();
+    }
+  };
 }
 
 export async function signArchivedForm(
@@ -1270,36 +1486,42 @@ export async function signArchivedForm(
   signatureQrData: string, 
   stampUrl?: string
 ): Promise<void> {
-  if (isSandboxActive()) {
-    const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
-    const idx = archives.findIndex(a => a.id === archiveId);
-    if (idx !== -1) {
-      archives[idx] = {
-        ...archives[idx],
-        isSigned: true,
-        signedAt: new Date().toISOString(),
-        signedByPrincipalName: principalName,
-        signatureQrData: signatureQrData,
-        signatureStampUrl: stampUrl || 'Stamping verified electronically',
-        updatedAt: new Date().toISOString()
-      };
-      setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
-    }
-    return;
-  }
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
 
-  const path = `archived_forms/${archiveId}`;
-  try {
-    await updateDoc(doc(db, 'archived_forms', archiveId), {
+  if (idx !== -1) {
+    archives[idx] = {
+      ...archives[idx],
       isSigned: true,
-      signedAt: serverTimestamp(),
+      workflowStage: 'principal_signed_transferred_to_teacher',
+      signedAt: nowIso,
       signedByPrincipalName: principalName,
       signatureQrData: signatureQrData,
       signatureStampUrl: stampUrl || 'Stamping verified electronically',
-      updatedAt: serverTimestamp()
-    });
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+  }
+
+  if (isSandboxActive()) return;
+
+  try {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
+      isSigned: true,
+      workflowStage: 'principal_signed_transferred_to_teacher',
+      signedAt: nowIso,
+      signedByPrincipalName: principalName,
+      signatureQrData: signatureQrData,
+      signatureStampUrl: stampUrl || 'Stamping verified electronically',
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn("Firestore signArchivedForm sync warning:", error);
   }
 }
 
@@ -1309,33 +1531,132 @@ export async function signArchivedTeacherForm(
   signatureQrData: string, 
   stampUrl?: string
 ): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
+
+  if (idx !== -1) {
+    archives[idx] = {
+      ...archives[idx],
+      isTeacherSigned: true,
+      workflowStage: 'completed',
+      teacherSignedAt: nowIso,
+      teacherSignedName: teacherName,
+      teacherSignatureQrData: signatureQrData,
+      teacherSignatureStampUrl: stampUrl || 'Teacher verified electronically',
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+  }
+
+  if (isSandboxActive()) return;
+
+  try {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
+      isTeacherSigned: true,
+      workflowStage: 'completed',
+      teacherSignedAt: nowIso,
+      teacherSignedName: teacherName,
+      teacherSignatureQrData: signatureQrData,
+      teacherSignatureStampUrl: stampUrl || 'Teacher verified electronically',
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
+  } catch (error) {
+    console.warn("Firestore signArchivedTeacherForm sync warning:", error);
+  }
+}
+
+export async function transferArchivedFormToPrincipal(
+  archiveId: string, 
+  adminName: string
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
+
+  if (idx !== -1) {
+    archives[idx] = {
+      ...archives[idx],
+      workflowStage: 'admin_transferred_to_principal',
+      adminReviewedAt: nowIso,
+      adminReviewedBy: adminName,
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+  }
+
+  if (isSandboxActive()) return;
+
+  try {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
+      workflowStage: 'admin_transferred_to_principal',
+      adminReviewedAt: nowIso,
+      adminReviewedBy: adminName,
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
+  } catch (error) {
+    console.warn("Firestore transferArchivedFormToPrincipal sync warning:", error);
+  }
+}
+
+export async function transferArchivedFormToTeacher(
+  archiveId: string, 
+  adminName: string
+): Promise<void> {
+  return transferArchivedFormToPrincipal(archiveId, adminName);
+}
+
+
+export async function markAssessmentReadByExaminer(
+  assessmentId: string, 
+  examinerName: string
+): Promise<void> {
+  const nowIso = new Date().toISOString();
   if (isSandboxActive()) {
-    const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
-    const idx = archives.findIndex(a => a.id === archiveId);
-    if (idx !== -1) {
-      archives[idx] = {
-        ...archives[idx],
-        isTeacherSigned: true,
-        teacherSignedAt: new Date().toISOString(),
-        teacherSignedName: teacherName,
-        teacherSignatureQrData: signatureQrData,
-        teacherSignatureStampUrl: stampUrl || 'Teacher verified electronically',
-        updatedAt: new Date().toISOString()
+    const assessments = getSandboxData<Assessment[]>(SANDBOX_ASSESSMENTS_KEY, INITIAL_SANDBOX_ASSESSMENTS);
+    const idx = assessments.findIndex(a => a.id === assessmentId);
+    if (idx !== -1 && !assessments[idx].examinerReadReceiptLogged) {
+      assessments[idx] = {
+        ...assessments[idx],
+        readByExaminer: { name: examinerName, timestamp: nowIso },
+        examinerReadReceiptLogged: true,
+        updatedAt: nowIso
       };
-      setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+      setSandboxData(SANDBOX_ASSESSMENTS_KEY, assessments);
+      await createActivityLog({
+        assessmentId,
+        action: 'EXAMINER_READ_RECEIPT',
+        userId: 'examiner',
+        userName: examinerName,
+        userRole: 'moderator',
+        comment: `تمت القراءة من قبل : المدقق أ. ${examinerName}`
+      });
     }
     return;
   }
 
-  const path = `archived_forms/${archiveId}`;
+  const path = `assessments/${assessmentId}`;
   try {
-    await updateDoc(doc(db, 'archived_forms', archiveId), {
-      isTeacherSigned: true,
-      teacherSignedAt: serverTimestamp(),
-      teacherSignedName: teacherName,
-      teacherSignatureQrData: signatureQrData,
-      teacherSignatureStampUrl: stampUrl || 'Teacher verified electronically',
+    await updateDoc(doc(db, 'assessments', assessmentId), {
+      readByExaminer: { name: examinerName, timestamp: nowIso },
+      examinerReadReceiptLogged: true,
       updatedAt: serverTimestamp()
+    });
+    await createActivityLog({
+      assessmentId,
+      action: 'EXAMINER_READ_RECEIPT',
+      userId: 'examiner',
+      userName: examinerName,
+      userRole: 'moderator',
+      comment: `تمت القراءة من قبل : المدقق أ. ${examinerName}`
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.UPDATE, path);
@@ -1350,40 +1671,79 @@ export async function signArchivedExaminerForm(
   conformanceStatus?: 'conforming' | 'non-conforming',
   hasGradeRevisions?: boolean
 ): Promise<void> {
-  if (isSandboxActive()) {
-    const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
-    const idx = archives.findIndex(a => a.id === archiveId);
-    if (idx !== -1) {
-      archives[idx] = {
-        ...archives[idx],
-        isExaminerSigned: true,
-        examinerSignedAt: new Date().toISOString(),
-        examinerSignedName: examinerName,
-        examinerSignatureQrData: signatureQrData,
-        examinerSignatureStampUrl: stampUrl || 'Examiner verified electronically',
-        conformanceStatus: conformanceStatus || undefined,
-        hasGradeRevisions: hasGradeRevisions || false,
-        updatedAt: new Date().toISOString()
-      };
-      setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
-    }
-    return;
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
+
+  if (idx !== -1) {
+    archives[idx] = {
+      ...archives[idx],
+      isExaminerSigned: true,
+      workflowStage: archives[idx].workflowStage || 'examiner_submitted_to_admin',
+      examinerSignedAt: nowIso,
+      examinerSignedName: examinerName,
+      examinerSignatureQrData: signatureQrData,
+      examinerSignatureStampUrl: stampUrl || 'Examiner verified electronically',
+      conformanceStatus: conformanceStatus || undefined,
+      hasGradeRevisions: hasGradeRevisions || false,
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
   }
 
-  const path = `archived_forms/${archiveId}`;
+  if (isSandboxActive()) return;
+
   try {
-    await updateDoc(doc(db, 'archived_forms', archiveId), {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
       isExaminerSigned: true,
-      examinerSignedAt: serverTimestamp(),
+      workflowStage: targetForm.workflowStage || 'examiner_submitted_to_admin',
+      examinerSignedAt: nowIso,
       examinerSignedName: examinerName,
       examinerSignatureQrData: signatureQrData,
       examinerSignatureStampUrl: stampUrl || 'Examiner verified electronically',
       conformanceStatus: conformanceStatus || null,
       hasGradeRevisions: hasGradeRevisions || false,
-      updatedAt: serverTimestamp()
-    });
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    console.warn("Firestore signArchivedExaminerForm sync warning:", error);
+  }
+}
+
+export async function updateArchivedFormStudents(
+  archiveId: string, 
+  students: StudentMark[]
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
+
+  if (idx !== -1) {
+    archives[idx] = {
+      ...archives[idx],
+      students,
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+  }
+
+  if (isSandboxActive()) return;
+
+  try {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
+      students,
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
+  } catch (error) {
+    console.warn("Firestore updateArchivedFormStudents sync warning:", error);
   }
 }
 
@@ -2086,7 +2446,12 @@ const INITIAL_SANDBOX_INSPECTION_PLANS: SchoolInspectionPlan[] = [
 
 export async function getInspectionPlans(): Promise<SchoolInspectionPlan[]> {
   if (isSandboxActive()) {
-    return getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
+    const raw = getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
+    return raw.map(p => ({
+      ...p,
+      // عندما يغلق مدير النظام الصلاحية تغلق صلاحية المدير تلقائياً
+      principalUnlocked: p.adminUnlocked ? (p.principalUnlocked ?? false) : false
+    }));
   }
 
   try {
@@ -2095,15 +2460,18 @@ export async function getInspectionPlans(): Promise<SchoolInspectionPlan[]> {
     const list: SchoolInspectionPlan[] = [];
     snap.forEach((d) => {
       const data = d.data();
+      const adminUnlocked = data.adminUnlocked ?? false;
+      // عندما يغلق مدير النظام الصلاحية تغلق صلاحية المدير تلقائياً
+      const principalUnlocked = adminUnlocked ? (data.principalUnlocked ?? false) : false;
       list.push({
         id: d.id,
         schoolId: data.schoolId || d.id,
         schoolName: data.schoolName,
         inspectionDate: data.inspectionDate,
-        adminUnlocked: data.adminUnlocked ?? false,
-        principalUnlocked: data.principalUnlocked ?? false,
+        adminUnlocked,
+        principalUnlocked,
         adminUnlockedAt: data.adminUnlockedAt,
-        principalUnlockedAt: data.principalUnlockedAt,
+        principalUnlockedAt: adminUnlocked ? data.principalUnlockedAt : undefined,
         notes: data.notes || '',
         createdAt: data.createdAt || new Date().toISOString(),
         updatedAt: data.updatedAt || new Date().toISOString()
@@ -2112,7 +2480,11 @@ export async function getInspectionPlans(): Promise<SchoolInspectionPlan[]> {
     return list;
   } catch (error) {
     console.warn('Error fetching inspection plans from firestore, using local state:', error);
-    return getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
+    const raw = getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
+    return raw.map(p => ({
+      ...p,
+      principalUnlocked: p.adminUnlocked ? (p.principalUnlocked ?? false) : false
+    }));
   }
 }
 
@@ -2122,19 +2494,29 @@ export async function saveInspectionPlan(plan: Partial<SchoolInspectionPlan> & {
     const plans = getSandboxData<SchoolInspectionPlan[]>(SANDBOX_INSPECTION_PLANS_KEY, INITIAL_SANDBOX_INSPECTION_PLANS);
     const existingIdx = plans.findIndex(p => isSameSchoolLocal(p.schoolName, plan.schoolName));
     if (existingIdx !== -1) {
+      const mergedAdminUnlocked = plan.adminUnlocked !== undefined ? plan.adminUnlocked : plans[existingIdx].adminUnlocked;
+      // عندما يغلق مدير النظام الصلاحية تغلق صلاحية المدير تلقائياً
+      const mergedPrincipalUnlocked = mergedAdminUnlocked 
+        ? (plan.principalUnlocked !== undefined ? plan.principalUnlocked : plans[existingIdx].principalUnlocked) 
+        : false;
       plans[existingIdx] = {
         ...plans[existingIdx],
         ...plan,
+        adminUnlocked: mergedAdminUnlocked,
+        principalUnlocked: mergedPrincipalUnlocked,
+        principalUnlockedAt: mergedPrincipalUnlocked ? (plan.principalUnlockedAt || plans[existingIdx].principalUnlockedAt) : undefined,
         updatedAt: now
       };
     } else {
+      const adminUnlocked = plan.adminUnlocked ?? false;
+      const principalUnlocked = adminUnlocked ? (plan.principalUnlocked ?? false) : false;
       plans.push({
         id: 'plan_' + Math.random().toString(36).substring(2, 9),
         schoolId: plan.schoolId || 'school_' + Math.random().toString(36).substring(2, 7),
         schoolName: plan.schoolName,
         inspectionDate: plan.inspectionDate || '2026-11-01',
-        adminUnlocked: plan.adminUnlocked ?? false,
-        principalUnlocked: plan.principalUnlocked ?? false,
+        adminUnlocked,
+        principalUnlocked,
         notes: plan.notes || '',
         createdAt: now,
         updatedAt: now
@@ -2150,17 +2532,28 @@ export async function saveInspectionPlan(plan: Partial<SchoolInspectionPlan> & {
     const snap = await getDocs(q);
     if (!snap.empty) {
       const docId = snap.docs[0].id;
+      const existingData = snap.docs[0].data();
+      const mergedAdminUnlocked = plan.adminUnlocked !== undefined ? plan.adminUnlocked : existingData.adminUnlocked;
+      // عندما يغلق مدير النظام الصلاحية تغلق صلاحية المدير تلقائياً
+      const mergedPrincipalUnlocked = mergedAdminUnlocked 
+        ? (plan.principalUnlocked !== undefined ? plan.principalUnlocked : existingData.principalUnlocked) 
+        : false;
       await updateDoc(doc(db, 'inspection_plans', docId), {
         ...plan,
+        adminUnlocked: mergedAdminUnlocked,
+        principalUnlocked: mergedPrincipalUnlocked,
+        principalUnlockedAt: mergedPrincipalUnlocked ? (plan.principalUnlockedAt || existingData.principalUnlockedAt) : null,
         updatedAt: now
       });
     } else {
+      const adminUnlocked = plan.adminUnlocked ?? false;
+      const principalUnlocked = adminUnlocked ? (plan.principalUnlocked ?? false) : false;
       await addDoc(plansRef, {
         schoolId: plan.schoolId || 'school_' + Math.random().toString(36).substring(2, 7),
         schoolName: plan.schoolName,
         inspectionDate: plan.inspectionDate || '2026-11-01',
-        adminUnlocked: plan.adminUnlocked ?? false,
-        principalUnlocked: plan.principalUnlocked ?? false,
+        adminUnlocked,
+        principalUnlocked,
         notes: plan.notes || '',
         createdAt: now,
         updatedAt: now
@@ -2176,8 +2569,9 @@ export async function toggleAdminUploadPermission(schoolName: string, unlocked: 
     schoolName,
     adminUnlocked: unlocked,
     adminUnlockedAt: unlocked ? new Date().toISOString() : undefined,
-    // If admin locks it, also lock principal's permission
-    ...(unlocked ? {} : { principalUnlocked: false })
+    // عندما يغلق مدير النظام الصلاحية تغلق صلاحية المدير تلقائياً
+    principalUnlocked: unlocked ? undefined : false,
+    principalUnlockedAt: unlocked ? undefined : undefined
   });
 }
 
@@ -2219,10 +2613,13 @@ export async function getSchoolUploadPermissionStatus(schoolName: string): Promi
     };
   }
 
-  const canUpload = matched.adminUnlocked && matched.principalUnlocked;
+  const adminUnlocked = matched.adminUnlocked ?? false;
+  // عندما يغلق مدير النظام الصلاحية تغلق صلاحية المدير تلقائياً
+  const principalUnlocked = adminUnlocked ? (matched.principalUnlocked ?? false) : false;
+  const canUpload = adminUnlocked && principalUnlocked;
   return {
-    adminUnlocked: matched.adminUnlocked,
-    principalUnlocked: matched.principalUnlocked,
+    adminUnlocked,
+    principalUnlocked,
     canTeacherUpload: canUpload,
     inspectionDate: matched.inspectionDate,
     notes: matched.notes

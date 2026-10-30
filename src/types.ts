@@ -59,6 +59,8 @@ export interface Assessment {
   pdfName?: string | null;
   pdfSize?: string | null;
   pdfData?: string | null;
+  readByExaminer?: { name: string; timestamp: string };
+  examinerReadReceiptLogged?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -136,6 +138,11 @@ export interface ArchivedForm {
   examinerSignatureStampUrl?: string;
   conformanceStatus?: 'conforming' | 'non-conforming';
   hasGradeRevisions?: boolean;
+  
+  // File processing lifecycle stage (Exact 4-step sequence: Auditor -> Admin -> Principal -> Teacher -> Completed)
+  workflowStage?: 'examiner_submitted_to_admin' | 'admin_transferred_to_principal' | 'principal_signed_transferred_to_teacher' | 'completed';
+  adminReviewedAt?: string;
+  adminReviewedBy?: string;
   
   createdAt: string;
   updatedAt: string;

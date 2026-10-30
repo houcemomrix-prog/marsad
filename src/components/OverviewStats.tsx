@@ -9,6 +9,7 @@ interface OverviewStatsProps {
   selectedStatus?: string;
   onStatusClick?: (status: AssessmentStatus) => void;
   userRoleType?: string;
+  userRole?: string;
 }
 
 export function OverviewStats({ 
@@ -16,8 +17,12 @@ export function OverviewStats({
   language = 'en',
   selectedStatus,
   onStatusClick,
-  userRoleType
+  userRoleType,
+  userRole
 }: OverviewStatsProps) {
+  if (userRole === 'moderator' || userRole === 'school') {
+    return null;
+  }
   const totalForms = assessments.length;
   const totalSamples = totalForms * 6; // 6 student samples per audit form
   const approved = assessments.filter((a) => a.status === 'Approved').length;

@@ -20,14 +20,16 @@ import {
   X,
   FileCheck,
   ShieldCheck,
-  Download
+  Download,
+  ArrowRight
 } from 'lucide-react';
 import { ArchivedForm, StudentMark, ObservationDetail, UserProfile, FormDesignSettings } from '../types';
-import { getFormDesignSettings } from '../services/db';
+import { getFormDesignSettings, transferArchivedFormToPrincipal } from '../services/db';
 import { executePdfDownload, printElementInIframe } from '../utils/pdfDownload';
 import { formatSafeDate } from '../utils/dateUtils';
 import { PdfDownloadModal } from './PdfDownloadModal';
 import { sortItemsByRole } from '../lib/sorting';
+import { isSubjectMatch, isUniversalSubject } from '../lib/translations';
 
 interface SchoolArchiveViewProps {
   archivedForms: ArchivedForm[];
@@ -41,9 +43,12 @@ interface SchoolArchiveViewProps {
     conformanceStatus?: 'conforming' | 'non-conforming', 
     hasGradeRevisions?: boolean
   ) => Promise<void>;
+  onTransferToPrincipal?: (archiveId: string, adminName: string) => Promise<void>;
   userProfile?: UserProfile | null;
   onSuccess: (msg: string) => void;
   certifiedOnly?: boolean;
+  initialSelectedFormId?: string | null;
+  onOpenTracker?: () => void;
 }
 
 export function SchoolArchiveView({ 
@@ -52,9 +57,12 @@ export function SchoolArchiveView({
   onSignForm,
   onSignTeacherForm,
   onSignExaminerForm,
+  onTransferToPrincipal,
   userProfile,
   onSuccess,
-  certifiedOnly = false
+  certifiedOnly = false,
+  initialSelectedFormId,
+  onOpenTracker
 }: SchoolArchiveViewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<'all' | 'signed' | 'unsigned'>('all');
@@ -78,11 +86,44 @@ export function SchoolArchiveView({
   const uniqueSchools = Array.from(new Set(archivedForms.map(f => f.schoolName).filter(Boolean))) as string[];
   const uniqueSubjects = Array.from(new Set(archivedForms.map(f => f.subject || f.subjectName).filter(Boolean))) as string[];
 
+  // Examiner-specific forms: show subject matches if any exist, otherwise show all synchronized forms
+  const examinerSubjectMatches = (userProfile?.role === 'moderator' && userProfile.subject)
+    ? archivedForms.filter(f => {
+        const s = f.subject || f.subjectName;
+        return !!s && !isUniversalSubject(s) && isSubjectMatch(userProfile.subject, s);
+      })
+    : [];
+  const examinerScopedForms = examinerSubjectMatches.length > 0 ? examinerSubjectMatches : archivedForms;
+  const examinerUniqueSchools = Array.from(new Set(examinerScopedForms.map(f => f.schoolName).filter(Boolean))) as string[];
+
   // Examiner Compliance Decision States
   const [showExaminerChoiceModal, setShowExaminerChoiceModal] = useState(false);
   const [examinerChoiceForm, setExaminerChoiceForm] = useState<ArchivedForm | null>(null);
   const [examinerCompliance, setExaminerCompliance] = useState<'conforming' | 'non-conforming' | null>(null);
   const [examinerGradeRevisions, setExaminerGradeRevisions] = useState<boolean>(false);
+
+  // Keep selectedForm synchronized in real time whenever archivedForms or initialSelectedFormId updates
+  useEffect(() => {
+    if (initialSelectedFormId) {
+      const target = archivedForms.find(f => f.id === initialSelectedFormId);
+      if (target) {
+        setSelectedForm(target);
+        return;
+      }
+    }
+    if (selectedForm) {
+      const updated = archivedForms.find(f => f.id === selectedForm.id) ||
+        archivedForms.find(f => f.schoolName === selectedForm.schoolName && f.teacherName === selectedForm.teacherName);
+      if (updated) {
+        setSelectedForm(updated);
+      }
+    } else if (archivedForms.length > 0) {
+      const latest = [...archivedForms].sort(
+        (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+      )[0];
+      setSelectedForm(latest || archivedForms[0]);
+    }
+  }, [archivedForms, initialSelectedFormId]);
 
   useEffect(() => {
     async function loadStyles() {
@@ -532,19 +573,20 @@ export function SchoolArchiveView({
 
       // Examiner hierarchical drill-down (School -> Teachers -> Uploads)
       if (userProfile?.role === 'moderator') {
+        if (examinerSubjectMatches.length > 0) {
+          const modSubj = userProfile.subject || '';
+          const fSubj = form.subject || form.subjectName || '';
+          if (!modSubj || !fSubj || isUniversalSubject(fSubj) || !isSubjectMatch(modSubj, fSubj)) {
+            return false;
+          }
+        }
         if (selectedExaminerSchool && form.schoolName !== selectedExaminerSchool) return false;
         if (selectedExaminerTeacher && (form.teacherName || form.schoolEmail || 'معلم المادة') !== selectedExaminerTeacher) return false;
       }
 
-      if (certifiedOnly) {
-        // In Certified Archive, only show forms that are fully signed
-        return matchesSearch && isFullySigned;
-      } else {
-        // In the pending/signing view, only show forms that are NOT fully signed yet (they are under verification)
-        if (selectedStatus === 'signed') return matchesSearch && !isFullySigned && form.isSigned;
-        if (selectedStatus === 'unsigned') return matchesSearch && !isFullySigned && !form.isSigned;
-        return matchesSearch && !isFullySigned;
-      }
+      if (selectedStatus === 'signed') return matchesSearch && form.isSigned;
+      if (selectedStatus === 'unsigned') return matchesSearch && !form.isSigned;
+      return matchesSearch;
     }),
     userProfile?.role
   );
@@ -555,6 +597,15 @@ export function SchoolArchiveView({
       const needsTeacher = true;
       const isFullySigned = !!(f.isSigned && f.isExaminerSigned && (!needsTeacher || f.isTeacherSigned));
       if (!isFullySigned) return false;
+
+      // Apply Examiner specialty subject filter if matches exist
+      if (userProfile?.role === 'moderator' && examinerSubjectMatches.length > 0) {
+        const modSubj = userProfile.subject || '';
+        const fSubj = f.subject || f.subjectName || '';
+        if (!modSubj || !fSubj || isUniversalSubject(fSubj) || !isSubjectMatch(modSubj, fSubj)) {
+          return false;
+        }
+      }
 
       // Apply Admin filters dynamically to stats as well (except quality filter, to keep quality stats correct!)
       if (userProfile?.role === 'admin') {
@@ -631,7 +682,65 @@ export function SchoolArchiveView({
     }
   };
 
+  // Roles matching
+  const isUserAdmin = userProfile?.role === 'admin';
+  const isUserExaminer = userProfile?.role === 'moderator';
+  const isUserPrincipal = Boolean(
+    userProfile?.role === 'school' &&
+    (userProfile?.roleType === 'administrative' ||
+      userProfile?.jobTitle?.includes('مدير') ||
+      userProfile?.email === 'school@moe.om' ||
+      userProfile?.roleType !== 'teacher')
+  );
+  const isUserTeacher = Boolean(
+    userProfile?.role === 'school' && !isUserPrincipal
+  );
+
+  const handleTransferToPrincipal = async (form: ArchivedForm) => {
+    if (!isUserAdmin) {
+      return;
+    }
+    setIsSigningInProcess(true);
+    try {
+      const adminName = userProfile?.name || 'مدير النظام';
+      if (onTransferToPrincipal) {
+        await onTransferToPrincipal(form.id, adminName);
+      } else {
+        await transferArchivedFormToPrincipal(form.id, adminName);
+      }
+
+      if (selectedForm && selectedForm.id === form.id) {
+        setSelectedForm(prev => prev ? {
+          ...prev,
+          workflowStage: 'admin_transferred_to_principal',
+          adminReviewedBy: adminName,
+          adminReviewedAt: new Date().toISOString()
+        } : null);
+      }
+
+      onSuccess(
+        language === 'ar'
+          ? '✓ تم تحويل الاستمارة لمدير المدرسة بنجاح وتحديث الحالة لدى جميع المستخدمين!'
+          : 'Form transferred to School Principal successfully and synced for all users!'
+      );
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSigningInProcess(false);
+    }
+  };
+
   const handleStartSignature = async (form: ArchivedForm, type: 'principal' | 'teacher' | 'examiner' = 'principal') => {
+    if (type === 'principal' && !isUserPrincipal) {
+      return;
+    }
+    if (type === 'teacher' && !isUserTeacher) {
+      return;
+    }
+    if (type === 'examiner' && !isUserExaminer) {
+      return;
+    }
+
     setIsSigningInProcess(true);
     setSignatureType(type);
     
@@ -658,6 +767,7 @@ export function SchoolArchiveView({
         if (selectedForm && selectedForm.id === form.id) {
           setSelectedForm(prev => prev ? {
             ...prev,
+            workflowStage: 'principal_signed_transferred_to_teacher',
             isSigned: true,
             signedAt: new Date().toISOString(),
             signedByPrincipalName: pName,
@@ -668,8 +778,8 @@ export function SchoolArchiveView({
         
         onSuccess(
           language === 'ar' 
-            ? '✓ تم توقيع واعتماد المدير بنجاح وبسرعة بضغطة زر واحدة فقط!' 
-            : 'Form authorized and signed off instantly as Principal!'
+            ? '✓ تم توقيع وختم مدير المدرسة وتحويل الاستمارة للمعلم بنجاح!' 
+            : 'Form authorized, stamped and transferred to Teacher!'
         );
       } else if (type === 'teacher') {
         if (onSignTeacherForm) {
@@ -680,6 +790,7 @@ export function SchoolArchiveView({
         if (selectedForm && selectedForm.id === form.id) {
           setSelectedForm(prev => prev ? {
             ...prev,
+            workflowStage: 'completed',
             isTeacherSigned: true,
             teacherSignedAt: new Date().toISOString(),
             teacherSignedName: tName,
@@ -689,7 +800,7 @@ export function SchoolArchiveView({
         
         onSuccess(
           language === 'ar' 
-            ? '✓ تم توقيع واعتماد معلم المادة بنجاح وبسرعة بضغطة زر واحدة فقط!' 
+            ? '✓ تم توقيع واعتماد معلم المادة بنجاح وظهور الاستمارة في المحادثة مع المدقق!' 
             : 'Form signed and approved instantly as Teacher!'
         );
       } else {
@@ -701,6 +812,7 @@ export function SchoolArchiveView({
         if (selectedForm && selectedForm.id === form.id) {
           setSelectedForm(prev => prev ? {
             ...prev,
+            workflowStage: 'examiner_submitted_to_admin',
             isExaminerSigned: true,
             examinerSignedAt: new Date().toISOString(),
             examinerSignedName: eName,
@@ -734,17 +846,11 @@ export function SchoolArchiveView({
   // 1. Examiner/Auditor signature: must not be examiner-signed yet
   const isExaminerPending = selectedForm ? !selectedForm.isExaminerSigned : false;
   
-  // 2. Teacher signature: examiner signed, teacher not signed yet
-  const isTeacherPending = selectedForm ? (selectedForm.isExaminerSigned && !selectedForm.isTeacherSigned) : false;
-  
-  // 3. Principal signature: examiner signed, teacher signed, principal not signed yet
-  const isPrincipalPending = selectedForm ? (selectedForm.isExaminerSigned && selectedForm.isTeacherSigned && !selectedForm.isSigned) : false;
-  
-  // Roles matching
-  const isUserAdmin = userProfile?.role === 'admin';
-  const isUserExaminer = userProfile?.role === 'moderator' || isUserAdmin;
-  const isUserTeacher = (userProfile?.role === 'school' && userProfile?.roleType === 'teacher') || isUserAdmin;
-  const isUserPrincipal = (userProfile?.role === 'school' && userProfile?.roleType === 'administrative') || isUserAdmin;
+  // 2. Principal signature: examiner signed, principal not signed yet
+  const isPrincipalPending = selectedForm ? (selectedForm.isExaminerSigned && !selectedForm.isSigned) : false;
+
+  // 3. Teacher signature: principal signed, teacher not signed yet
+  const isTeacherPending = selectedForm ? (selectedForm.isSigned && !selectedForm.isTeacherSigned) : false;
   
   // Visibility of buttons
   const showExaminerSignBtn = isExaminerPending && isUserExaminer;
@@ -765,11 +871,23 @@ export function SchoolArchiveView({
         
         <div className="relative flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
           <div className="space-y-2">
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-400/15 text-amber-300 rounded-full text-[11px] font-black uppercase">
-              🗃️ {certifiedOnly 
-                ? (language === 'ar' ? 'أرشيف الاستمارات' : 'Forms Archive')
-                : (language === 'ar' ? 'الأرشيف الوطني الرقمي' : 'Digital School Archive')}
-            </span>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-amber-400/15 text-amber-300 rounded-full text-[11px] font-black uppercase">
+                🗃️ {certifiedOnly 
+                  ? (language === 'ar' ? 'أرشيف الاستمارات' : 'Forms Archive')
+                  : (language === 'ar' ? 'الأرشيف الوطني الرقمي' : 'Digital School Archive')}
+              </span>
+              {onOpenTracker && (
+                <button
+                  type="button"
+                  onClick={onOpenTracker}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-1 bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-full text-[11px] font-black cursor-pointer shadow-sm transition-all active:scale-95"
+                >
+                  <span className="w-2 h-2 rounded-full bg-slate-950 animate-ping" />
+                  <span>{language === 'ar' ? '📡 أداة تتبع الاستمارة المباشر' : '📡 Live Form Tracker'}</span>
+                </button>
+              )}
+            </div>
             <h2 className="text-xl sm:text-2xl font-black text-amber-400 font-heading">
               {certifiedOnly
                 ? (language === 'ar' ? 'الاستمارات المطابقة وغير المطابقة' : 'Conforming and Non-conforming Forms')
@@ -904,11 +1022,11 @@ export function SchoolArchiveView({
                 {/* Level 1: Schools List */}
                 {!selectedExaminerSchool ? (
                   <div className="space-y-2 max-h-[38vh] overflow-y-auto pr-1">
-                    {uniqueSchools.length === 0 ? (
-                      <p className="text-center text-xs text-slate-300 py-6">{language === 'ar' ? 'لا توجد مدارس مسجلة.' : 'No schools found.'}</p>
+                    {examinerUniqueSchools.length === 0 ? (
+                      <p className="text-center text-xs text-slate-300 py-6">{language === 'ar' ? 'لا توجد مدارس لديها ملفات في تخصصك حالياً.' : 'No schools found for your subject.'}</p>
                     ) : (
-                      uniqueSchools.map((sch, idx) => {
-                        const count = archivedForms.filter(f => f.schoolName === sch).length;
+                      examinerUniqueSchools.map((sch, idx) => {
+                        const count = examinerScopedForms.filter(f => f.schoolName === sch).length;
                         return (
                           <div
                             key={`exam-sch-${idx}`}
@@ -933,11 +1051,11 @@ export function SchoolArchiveView({
                 ) : !selectedExaminerTeacher ? (
                   // Level 2: Teachers List for Selected School
                   <div className="space-y-2 max-h-[38vh] overflow-y-auto pr-1">
-                    {Array.from(new Set(archivedForms.filter(f => f.schoolName === selectedExaminerSchool).map(f => f.teacherName || f.schoolEmail || 'معلم المادة').filter(Boolean))).length === 0 ? (
-                      <p className="text-center text-xs text-slate-300 py-6">{language === 'ar' ? 'لا يوجد معلمون لهذه المدرسة.' : 'No teachers found.'}</p>
+                    {Array.from(new Set(examinerScopedForms.filter(f => f.schoolName === selectedExaminerSchool).map(f => f.teacherName || f.schoolEmail || 'معلم المادة').filter(Boolean))).length === 0 ? (
+                      <p className="text-center text-xs text-slate-300 py-6">{language === 'ar' ? 'لا يوجد معلمون لهذه المادة في هذه المدرسة.' : 'No teachers found for this subject in this school.'}</p>
                     ) : (
-                      Array.from(new Set(archivedForms.filter(f => f.schoolName === selectedExaminerSchool).map(f => f.teacherName || f.schoolEmail || 'معلم المادة').filter(Boolean))).map((teach, idx) => {
-                        const teacherUploads = archivedForms.filter(f => f.schoolName === selectedExaminerSchool && (f.teacherName || f.schoolEmail || 'معلم المادة') === teach);
+                      Array.from(new Set(examinerScopedForms.filter(f => f.schoolName === selectedExaminerSchool).map(f => f.teacherName || f.schoolEmail || 'معلم المادة').filter(Boolean))).map((teach, idx) => {
+                        const teacherUploads = examinerScopedForms.filter(f => f.schoolName === selectedExaminerSchool && (f.teacherName || f.schoolEmail || 'معلم المادة') === teach);
                         const firstForm = teacherUploads[0];
                         return (
                           <div
@@ -1166,15 +1284,17 @@ export function SchoolArchiveView({
                 >
                   <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-50">
                     <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black ${
-                      form.isSigned 
+                      form.isSigned && form.isTeacherSigned
                         ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
                         : !form.isExaminerSigned
                           ? 'bg-violet-50 text-violet-750 border border-violet-200'
-                          : !form.isTeacherSigned
-                            ? 'bg-sky-50 text-sky-750 border border-sky-200'
-                            : 'bg-amber-50 text-amber-800 border border-amber-250'
+                          : form.workflowStage !== 'admin_transferred_to_principal' && !form.isSigned
+                            ? 'bg-amber-50 text-amber-800 border border-amber-250'
+                            : !form.isSigned
+                              ? 'bg-blue-50 text-blue-750 border border-blue-200'
+                              : 'bg-indigo-50 text-indigo-750 border border-indigo-200'
                     }`}>
-                      {form.isSigned ? (
+                      {form.isSigned && form.isTeacherSigned ? (
                         <>
                           <CheckCircle className="w-2.5 h-2.5" />
                           <span>{language === 'ar' ? 'معتمد ومختوم رسمياً ✓' : 'Certified & Stamped'}</span>
@@ -1182,17 +1302,22 @@ export function SchoolArchiveView({
                       ) : !form.isExaminerSigned ? (
                         <>
                           <Clock className="w-2.5 h-2.5 animate-pulse" />
-                          <span>{language === 'ar' ? '1. بانتظار توقيع المدقق' : '1. Awaiting Auditor'}</span>
+                          <span>{language === 'ar' ? '1. ملء وتوقيع المدقق' : '1. Awaiting Auditor'}</span>
                         </>
-                      ) : !form.isTeacherSigned ? (
+                      ) : form.workflowStage !== 'admin_transferred_to_principal' && !form.isSigned ? (
                         <>
                           <Clock className="w-2.5 h-2.5 animate-pulse" />
-                          <span>{language === 'ar' ? '2. بانتظار توقيع المعلم' : '2. Awaiting Teacher'}</span>
+                          <span>{language === 'ar' ? '2. تحويل لمدير المدرسة' : '2. Transfer to Principal'}</span>
+                        </>
+                      ) : !form.isSigned ? (
+                        <>
+                          <Clock className="w-2.5 h-2.5 animate-pulse" />
+                          <span>{language === 'ar' ? '3. توقيع وختم مدير المدرسة وتحويل للمعلم' : '3. Awaiting Principal'}</span>
                         </>
                       ) : (
                         <>
                           <Clock className="w-2.5 h-2.5 animate-pulse" />
-                          <span>{language === 'ar' ? '3. بانتظار اعتماد المدير والختم' : '3. Awaiting Principal'}</span>
+                          <span>{language === 'ar' ? '4. توقيع المعلم' : '4. Awaiting Teacher'}</span>
                         </>
                       )}
                     </span>
@@ -1230,91 +1355,102 @@ export function SchoolArchiveView({
               {/* Document Header Status Strip */}
               <div className="bg-white rounded-2xl p-4 border border-slate-150 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 rtl:flex-row-reverse text-right">
                 <div className="flex items-center gap-3">
-                  <div className={`p-3 rounded-xl ${selectedForm.isSigned ? 'bg-emerald-50 text-emerald-700' : !selectedForm.isExaminerSigned ? 'bg-violet-50 text-violet-750' : !selectedForm.isTeacherSigned ? 'bg-sky-50 text-sky-750' : 'bg-amber-50 text-amber-800'}`}>
-                    <FileCheck className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs sm:text-sm font-black text-slate-800">
-                      {!selectedForm.isExaminerSigned 
-                        ? (language === 'ar' ? 'المرحلة (1): بانتظار تجهيز وتوقيع المدقق' : 'Phase 1: Awaiting Auditor Preparation & Sign')
-                        : !selectedForm.isTeacherSigned 
-                          ? (language === 'ar' ? 'المرحلة (2): وقع المدقق - بانتظار توقيع المعلم بالعلم' : 'Phase 2: Auditor Signed - Awaiting Teacher Signature')
-                          : !selectedForm.isSigned 
-                            ? (language === 'ar' ? 'المرحلة (3): وقع المعلم - بانتظار توقيع واعتماد المدير والختم الرسمي' : 'Phase 3: Teacher Signed - Awaiting Principal Signature & Stamp')
-                            : (language === 'ar' ? 'استمارة معتمدة ومختومة رسمياً بالكامل ✓' : 'Fully Certified & Signed Documents Ledger')}
-                    </h3>
-                    <p className="text-[10.5px] text-slate-500 mt-0.5 leading-relaxed">
-                      {selectedForm.isSigned 
-                        ? `${language === 'ar' ? 'الاعتماد الختامي للمدير:' : 'Principal Certified:'} ${selectedForm.signedByPrincipalName || 'مدير المدرسة'} | ${language === 'ar' ? 'توقيع المعلم:' : 'Teacher:'} ${selectedForm.teacherSignedName || selectedForm.teacherName} | ${language === 'ar' ? 'توقيع المدقق:' : 'Auditor:'} ${selectedForm.examinerSignedName}`
-                        : !selectedForm.isExaminerSigned
-                          ? (language === 'ar' ? 'يقوم المدقق بمراجعة عينات درجات الطلاب وتجهيز الاستمارة وتوقيعها لإرسالها للمعلم.' : 'Auditor reviews marks samples, prepares form and signs it to send to teacher.')
-                          : !selectedForm.isTeacherSigned
-                            ? `${language === 'ar' ? 'تم تجهيز وتوقيع الاستمارة من المدقق:' : 'Auditor Signed:'} ${selectedForm.examinerSignedName} ➔ ${language === 'ar' ? 'بانتظار توقيع المعلم:' : 'Awaiting Teacher:'} ${selectedForm.teacherName}`
-                            : `${language === 'ar' ? 'تم توقيع المدقق والمعلم بنجاح ➔ بانتظار توقيع واعتماد مدير مدرسة ' : 'Auditor and Teacher signed. Awaiting principal stamp of '} ${selectedForm.schoolName}`}
-                    </p>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={isSigningInProcess}
+                    onClick={() => {
+                      if (isUserExaminer) {
+                        setExaminerChoiceForm(selectedForm);
+                        setExaminerCompliance(null);
+                        setExaminerGradeRevisions(false);
+                        setShowExaminerChoiceModal(true);
+                      } else if (isUserAdmin) {
+                        handleTransferToPrincipal(selectedForm);
+                      } else if (isUserPrincipal) {
+                        handleStartSignature(selectedForm, 'principal');
+                      } else if (isUserTeacher) {
+                        handleStartSignature(selectedForm, 'teacher');
+                      }
+                    }}
+                    className={`px-5 py-3 rounded-xl text-xs sm:text-sm font-black shadow-md hover:shadow-lg active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                      isUserExaminer
+                        ? selectedForm.isExaminerSigned
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-violet-600 hover:bg-violet-700 text-white'
+                        : isUserAdmin
+                        ? selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                        : isUserPrincipal
+                        ? selectedForm.isSigned
+                          ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                          : 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        : selectedForm.isTeacherSigned
+                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                        : 'bg-sky-600 hover:bg-sky-700 text-white'
+                    }`}
+                  >
+                    {isUserExaminer ? (
+                      <>
+                        <PenTool className="w-4 h-4" />
+                        <span>
+                          {selectedForm.isExaminerSigned
+                            ? (language === 'ar' ? '✓ تم توقيع المدقق وتحويلها لمدير النظام' : '✓ Auditor Signed & Transferred to Admin')
+                            : (language === 'ar' ? '1. ملء وتوقيع المدقق وتحويل لمدير النظام' : '1. Auditor Sign & Transfer to Admin')}
+                        </span>
+                      </>
+                    ) : isUserAdmin ? (
+                      <>
+                        <ArrowRight className="w-4 h-4" />
+                        <span>
+                          {selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                            ? (language === 'ar' ? '✓ تم التحويل لمدير المدرسة' : '✓ Transferred to Principal')
+                            : (language === 'ar' ? 'تحويل لمدير المدرسة' : 'Transfer to Principal')}
+                        </span>
+                      </>
+                    ) : isUserPrincipal ? (
+                      <>
+                        <PenTool className="w-4 h-4" />
+                        <span>
+                          {selectedForm.isSigned
+                            ? (language === 'ar' ? '✓ تم التوقيع والختم وتحويل للمعلم' : '✓ Signed, Stamped & Transferred to Teacher')
+                            : (language === 'ar' ? 'توقيع وختم مدير المدرسة وتحويل للمعلم' : 'Principal Sign, Stamp & Transfer to Teacher')}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <PenTool className="w-4 h-4" />
+                        <span>
+                          {selectedForm.isTeacherSigned
+                            ? (language === 'ar' ? '✓ تم توقيع المعلم واعتماد الاستمارة' : '✓ Teacher Signed & Certified')
+                            : (language === 'ar' ? 'توقيع المعلم' : 'Teacher Signature')}
+                        </span>
+                      </>
+                    )}
+                  </button>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto shrink-0 justify-end">
-                  {showPrincipalSignBtn && (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => handleStartSignature(selectedForm, 'principal')}
-                        className="flex-1 sm:flex-none px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer animate-pulse"
-                      >
-                        <PenTool className="w-3.5 h-3.5" />
-                        <span>{language === 'ar' ? 'ختم وتوقيع' : 'Stamp & Sign'}</span>
-                      </button>
-                    </>
-                  )}
-
                   {/* Inform Principal if waiting for previous steps */}
                   {isUserPrincipal && !selectedForm.isSigned && !isPrincipalPending && (
                     <span className="px-3 py-2 bg-amber-50 border border-amber-200 text-amber-800 text-[11px] font-bold rounded-xl flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 animate-pulse text-amber-600" />
                       <span>
                         {!selectedForm.isExaminerSigned 
-                          ? (language === 'ar' ? 'بانتظار توقيع المدقق ثم المعلم أولاً' : 'Waiting for Auditor & Teacher')
-                          : (language === 'ar' ? 'بانتظار توقيع المعلم أولاً (المرحلة 2)' : 'Waiting for Teacher Signature')}
+                          ? (language === 'ar' ? 'بانتظار توقيع المدقق أولاً' : 'Waiting for Auditor')
+                          : (language === 'ar' ? 'بانتظار تحويل مدير النظام أولاً (المرحلة 2)' : 'Waiting for System Admin Transfer')}
                       </span>
                     </span>
                   )}
 
-                  {showTeacherSignBtn && (
-                    <button
-                      type="button"
-                      onClick={() => handleStartSignature(selectedForm, 'teacher')}
-                      className="flex-1 sm:flex-none px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer animate-pulse"
-                    >
-                      <PenTool className="w-3.5 h-3.5" />
-                      <span>{language === 'ar' ? '🖊️ توقيع المعلم بالعلم وإرسالها للمدير (المرحلة 2)' : 'Sign as Teacher & Forward'}</span>
-                    </button>
-                  )}
-
-                  {/* Inform Teacher if waiting for Auditor */}
-                  {isUserTeacher && !selectedForm.isTeacherSigned && !selectedForm.isExaminerSigned && (
+                  {/* Inform Teacher if waiting for Auditor or Principal */}
+                  {isUserTeacher && !selectedForm.isTeacherSigned && !selectedForm.isSigned && (
                     <span className="px-3 py-2 bg-violet-50 border border-violet-200 text-violet-800 text-[11px] font-bold rounded-xl flex items-center gap-1.5">
                       <Clock className="w-3.5 h-3.5 animate-pulse text-violet-600" />
-                      <span>{language === 'ar' ? 'بانتظار تجهيز وتوقيع المدقق أولاً (المرحلة 1)' : 'Waiting for Auditor'}</span>
+                      <span>{language === 'ar' ? 'بانتظار توقيع وختم مدير المدرسة أولاً (المرحلة 3)' : 'Waiting for Principal Sign & Stamp'}</span>
                     </span>
                   )}
 
-                  {showExaminerSignBtn && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExaminerChoiceForm(selectedForm);
-                        setExaminerCompliance(null);
-                        setExaminerGradeRevisions(false);
-                        setShowExaminerChoiceModal(true);
-                      }}
-                      className="flex-1 sm:flex-none px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white rounded-xl text-xs font-black shadow-sm flex items-center justify-center gap-1.5 cursor-pointer animate-pulse"
-                    >
-                      <PenTool className="w-3.5 h-3.5" />
-                      <span>{language === 'ar' ? '🖊️ توقيع المدقق وإرسالها للمعلم (المرحلة 1)' : 'Sign as Auditor & Forward'}</span>
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={handlePrintPDF}
@@ -1356,124 +1492,234 @@ export function SchoolArchiveView({
                     <span className={`px-2.5 py-1 text-[10px] font-black rounded-lg ${
                       !selectedForm.isExaminerSigned
                         ? 'bg-violet-100 text-violet-800 ring-1 ring-violet-200'
-                        : !selectedForm.isTeacherSigned
-                          ? 'bg-sky-100 text-sky-800 ring-1 ring-sky-200'
+                        : selectedForm.workflowStage !== 'admin_transferred_to_principal' && !selectedForm.isSigned && !selectedForm.isTeacherSigned
+                          ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
                           : !selectedForm.isSigned
-                            ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
-                            : 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
+                            ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
+                            : !selectedForm.isTeacherSigned
+                              ? 'bg-indigo-100 text-indigo-800 ring-1 ring-indigo-200'
+                              : 'bg-emerald-100 text-emerald-800 ring-1 ring-emerald-200'
                     }`}>
                       {!selectedForm.isExaminerSigned
-                        ? (language === 'ar' ? 'المدقق (المرحلة 1: تجهيز وتوقيع)' : 'Auditor (Phase 1)')
-                        : !selectedForm.isTeacherSigned
-                          ? (language === 'ar' ? 'معلم المادة (المرحلة 2: توقيع بالعلم)' : 'Subject Teacher (Phase 2)')
+                        ? (language === 'ar' ? '1. ملء وتوقيع المدقق' : '1. Auditor Sign')
+                        : selectedForm.workflowStage !== 'admin_transferred_to_principal' && !selectedForm.isSigned && !selectedForm.isTeacherSigned
+                          ? (language === 'ar' ? '2. تحويل لمدير المدرسة' : '2. Transfer to Principal')
                           : !selectedForm.isSigned
-                            ? (language === 'ar' ? 'مدير المدرسة (المرحلة 3: اعتماد وختم)' : 'School Principal (Phase 3)')
-                            : (language === 'ar' ? 'معتمدة ومختومة بالكامل رسمياً ✓' : 'Signed, Certified & Stamped')}
+                            ? (language === 'ar' ? '3. توقيع وختم مدير المدرسة وتحويل للمعلم' : '3. Principal Sign & Stamp')
+                            : !selectedForm.isTeacherSigned
+                              ? (language === 'ar' ? '4. توقيع المعلم' : '4. Teacher Signature')
+                              : (language === 'ar' ? 'معتمدة ومختومة بالكامل رسمياً ✓' : 'Signed, Certified & Stamped')}
                     </span>
                   </div>
                 </div>
 
-                {/* Steps Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 text-right">
-                  {/* Step 1: Inspector/Examiner/Auditor */}
-                  <div className={`p-3 rounded-xl border transition-all flex items-center gap-3 ${
-                    selectedForm.isExaminerSigned 
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
-                      : 'bg-violet-50 text-violet-800 border-violet-200 ring-2 ring-violet-500/15'
-                  }`}>
+                {/* Steps Grid (4 Steps) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-right">
+                  {/* Step 1: Auditor (Only clickable by Moderator/Auditor) */}
+                  <div
+                    role={isUserExaminer ? 'button' : undefined}
+                    tabIndex={isUserExaminer ? 0 : undefined}
+                    onClick={
+                      isUserExaminer
+                        ? () => {
+                            setExaminerChoiceForm(selectedForm);
+                            setExaminerCompliance(null);
+                            setExaminerGradeRevisions(false);
+                            setShowExaminerChoiceModal(true);
+                          }
+                        : undefined
+                    }
+                    className={`p-3 rounded-xl border transition-all flex items-center gap-2.5 ${
+                      isUserExaminer
+                        ? 'cursor-pointer hover:scale-[1.02] active:scale-95 shadow-xs'
+                        : 'cursor-not-allowed opacity-70 select-none'
+                    } ${
+                      selectedForm.isExaminerSigned 
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                        : isUserExaminer
+                        ? 'bg-violet-600 hover:bg-violet-700 text-white border-violet-700 ring-2 ring-violet-500/30'
+                        : 'bg-violet-50 text-violet-800 border-violet-200'
+                    }`}
+                  >
                     <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
                       selectedForm.isExaminerSigned 
                         ? 'bg-emerald-600 text-white' 
-                        : 'bg-violet-700 text-white animate-pulse'
+                        : isUserExaminer
+                        ? 'bg-white/20 text-white animate-pulse'
+                        : 'bg-violet-700 text-white'
                     }`}>
                       {selectedForm.isExaminerSigned ? '✓' : '1'}
                     </div>
                     <div className="min-w-0 text-right">
-                      <h5 className="font-bold text-slate-800 text-[11px] leading-tight">
-                        {language === 'ar' ? '1. تجهيز وتوقيع المدقق' : '1. Auditor Preparation & Sign'}
+                      <h5 className={`font-bold text-[10.5px] leading-tight ${
+                        !selectedForm.isExaminerSigned && isUserExaminer ? 'text-white' : 'text-slate-800'
+                      }`}>
+                        {language === 'ar' ? '1. ملء وتوقيع المدقق' : '1. Auditor Filling & Sign'}
                       </h5>
-                      <span className="text-[9.5px] text-slate-500 font-sans block truncate mt-0.5">
+                      <span className={`text-[9px] font-sans block truncate mt-0.5 ${
+                        !selectedForm.isExaminerSigned && isUserExaminer ? 'text-violet-100' : 'text-slate-500'
+                      }`}>
                         {selectedForm.isExaminerSigned 
                           ? `${language === 'ar' ? 'الموقع:' : 'By:'} ${selectedForm.examinerSignedName}` 
-                          : (language === 'ar' ? 'انتظار تجهيز وتوقيع المدقق' : 'Awaiting auditor')}
+                          : isUserExaminer
+                            ? (language === 'ar' ? 'اضغط لتوقيع المدقق' : 'Click to sign as auditor')
+                            : (language === 'ar' ? 'خاص بالمدقق فقط' : 'Auditor only')}
                       </span>
-                      {selectedForm.isExaminerSigned && selectedForm.conformanceStatus && (
-                        <div className="mt-1 flex flex-wrap gap-1">
-                          <span className={`px-1.5 py-0.5 rounded-sm text-[8.5px] font-black ${
-                            selectedForm.conformanceStatus === 'conforming' 
-                              ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
-                              : 'bg-rose-100 text-rose-800 border border-rose-200'
-                          }`}>
-                            {selectedForm.conformanceStatus === 'conforming' ? (language === 'ar' ? 'مطابقة' : 'Conforming') : (language === 'ar' ? 'غير مطابقة' : 'Non-conforming')}
-                          </span>
-                          {selectedForm.hasGradeRevisions && (
-                            <span className="px-1.5 py-0.5 rounded-sm text-[8.5px] font-black bg-amber-100 text-amber-805 border border-amber-200">
-                              {language === 'ar' ? 'تعديل درجات' : 'Grade Revisions'}
-                            </span>
-                          )}
-                        </div>
-                      )}
                     </div>
                   </div>
 
-                  {/* Step 2: Teacher */}
-                  <div className={`p-3 rounded-xl border transition-all flex items-center gap-3 ${
-                    selectedForm.isTeacherSigned 
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
-                      : selectedForm.isExaminerSigned
-                        ? 'bg-sky-50 text-sky-800 border-sky-200 ring-2 ring-sky-500/15'
-                        : 'bg-slate-100 border-slate-200 opacity-60'
-                  }`}>
+                  {/* Step 2: System Admin - Clickable Button ONLY for System Admin */}
+                  <div
+                    role={isUserAdmin ? 'button' : undefined}
+                    tabIndex={isUserAdmin ? 0 : undefined}
+                    onClick={isUserAdmin ? () => handleTransferToPrincipal(selectedForm) : undefined}
+                    className={`p-3 rounded-xl border transition-all flex items-center gap-2.5 shadow-xs ${
+                      isUserAdmin
+                        ? 'cursor-pointer hover:scale-[1.02] active:scale-95'
+                        : 'cursor-not-allowed opacity-70 select-none'
+                    } ${
+                      selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                        : isUserAdmin
+                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700 ring-2 ring-indigo-500/30'
+                        : 'bg-slate-100 border-slate-200 text-slate-500'
+                    }`}
+                  >
                     <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
-                      selectedForm.isTeacherSigned 
+                      selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
                         ? 'bg-emerald-600 text-white' 
-                        : selectedForm.isExaminerSigned
-                          ? 'bg-sky-700 text-white animate-pulse'
-                          : 'bg-slate-300 text-slate-600'
+                        : isUserAdmin
+                        ? 'bg-white/20 text-white animate-pulse'
+                        : 'bg-slate-300 text-slate-600'
                     }`}>
-                      {selectedForm.isTeacherSigned ? '✓' : '2'}
+                      {selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned ? '✓' : '2'}
                     </div>
                     <div className="min-w-0 text-right">
-                      <h5 className="font-bold text-slate-800 text-[11px] leading-tight">
-                        {language === 'ar' ? '2. توقيع المعلم بالعلم' : '2. Subject Teacher Signature'}
+                      <h5 className={`font-bold text-[10.5px] leading-tight ${
+                        selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                          ? 'text-slate-800'
+                          : isUserAdmin
+                          ? 'text-white'
+                          : 'text-slate-800'
+                      }`}>
+                        {language === 'ar' ? '2. تحويل لمدير المدرسة' : '2. Transfer to Principal'}
                       </h5>
-                      <span className="text-[9.5px] text-slate-500 font-sans block truncate mt-0.5">
-                        {selectedForm.isTeacherSigned 
-                          ? `${language === 'ar' ? 'الموقع:' : 'Signature:'} ${selectedForm.teacherSignedName || selectedForm.teacherName}` 
-                          : selectedForm.isExaminerSigned
-                            ? (language === 'ar' ? 'جاهز لتوقيع المعلم بالعلم' : 'Available to sign')
-                            : (language === 'ar' ? 'بانتظار توقيع المدقق أولاً' : 'Locked')}
+                      <span className={`text-[9px] font-sans block truncate mt-0.5 ${
+                        selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                          ? 'text-slate-500'
+                          : isUserAdmin
+                          ? 'text-indigo-100'
+                          : 'text-slate-500'
+                      }`}>
+                        {selectedForm.adminReviewedBy 
+                          ? `${language === 'ar' ? 'تم التحويل:' : 'By:'} ${selectedForm.adminReviewedBy}` 
+                          : isUserAdmin
+                            ? (language === 'ar' ? 'اضغط لتحويلها لمدير المدرسة' : 'Click to transfer to Principal')
+                            : (language === 'ar' ? 'خاص بمدير النظام فقط' : 'System Admin only')}
                       </span>
                     </div>
                   </div>
 
-                  {/* Step 3: School Principal */}
-                  <div className={`p-3 rounded-xl border transition-all flex items-center gap-3 ${
-                    selectedForm.isSigned 
-                      ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
-                      : (selectedForm.isExaminerSigned && selectedForm.isTeacherSigned)
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-2 ring-emerald-500/15'
-                        : 'bg-slate-100 border-slate-200 opacity-60'
-                  }`}>
+                  {/* Step 3: School Principal - Active & Clickable ONLY for School Principal */}
+                  <div
+                    role={isUserPrincipal ? 'button' : undefined}
+                    tabIndex={isUserPrincipal ? 0 : undefined}
+                    onClick={isUserPrincipal ? () => handleStartSignature(selectedForm, 'principal') : undefined}
+                    className={`p-3 rounded-xl border transition-all flex items-center gap-2.5 shadow-xs ${
+                      isUserPrincipal
+                        ? 'cursor-pointer hover:scale-[1.02] active:scale-95'
+                        : 'cursor-not-allowed opacity-65 select-none'
+                    } ${
+                      selectedForm.isSigned && !isUserPrincipal
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : isUserPrincipal
+                        ? selectedForm.isSigned
+                          ? 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-800 ring-2 ring-emerald-500/30'
+                          : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700 ring-2 ring-emerald-500/30'
+                        : selectedForm.workflowStage === 'admin_transferred_to_principal'
+                          ? 'bg-blue-50 text-blue-800 border-blue-200'
+                          : 'bg-slate-100 border-slate-200 text-slate-400'
+                    }`}
+                  >
                     <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
-                      selectedForm.isSigned 
+                      isUserPrincipal
+                        ? 'bg-white/20 text-white animate-pulse'
+                        : selectedForm.isSigned 
                         ? 'bg-emerald-600 text-white' 
-                        : (selectedForm.isExaminerSigned && selectedForm.isTeacherSigned)
-                          ? 'bg-emerald-700 text-white animate-pulse'
+                        : selectedForm.workflowStage === 'admin_transferred_to_principal'
+                          ? 'bg-blue-700 text-white'
                           : 'bg-slate-300 text-slate-600'
                     }`}>
                       {selectedForm.isSigned ? '✓' : '3'}
                     </div>
                     <div className="min-w-0 text-right">
-                      <h5 className="font-bold text-slate-800 text-[11px] leading-tight">
-                        {language === 'ar' ? '3. توقيع واعتماد المدير والختم' : '3. Principal Sign & Stamp'}
+                      <h5 className={`font-bold text-[10.5px] leading-tight ${
+                        isUserPrincipal ? 'text-white' : 'text-slate-800'
+                      }`}>
+                        {language === 'ar' ? '3. توقيع وختم مدير المدرسة وتحويل للمعلم' : '3. Principal Sign & Stamp'}
                       </h5>
-                      <span className="text-[9.5px] text-slate-500 font-sans block truncate mt-0.5">
-                        {selectedForm.isSigned 
-                          ? `${language === 'ar' ? 'المعتمد:' : 'Certified:'} ${selectedForm.signedByPrincipalName || 'مدير المدرسة'}` 
-                          : (selectedForm.isExaminerSigned && selectedForm.isTeacherSigned)
-                            ? (language === 'ar' ? 'جاهز لاعتماد المدير وختم المدرسة' : 'Available for Director')
-                            : (language === 'ar' ? 'بانتظار توقيع المعلم أولاً' : 'Locked')}
+                      <span className={`text-[9px] font-sans block truncate mt-0.5 ${
+                        isUserPrincipal ? 'text-emerald-100' : 'text-slate-500'
+                      }`}>
+                        {isUserPrincipal
+                          ? selectedForm.isSigned
+                            ? `${language === 'ar' ? 'تم التوقيع والختم (اضغط لتحديث التحويل للمعلم)' : 'Signed & Stamped'}`
+                            : (language === 'ar' ? 'اضغط لتوقيع وختم المدير وتحويلها للمعلم' : 'Click for principal sign, stamp & transfer')
+                          : selectedForm.isSigned 
+                            ? `${language === 'ar' ? 'المعتمِد:' : 'Certified:'} ${selectedForm.signedByPrincipalName || 'مدير المدرسة'}` 
+                            : (language === 'ar' ? 'خاص بمدير المدرسة فقط' : 'Principal only')}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Step 4: Teacher - Active & Clickable ONLY for Teacher */}
+                  <div
+                    role={isUserTeacher ? 'button' : undefined}
+                    tabIndex={isUserTeacher ? 0 : undefined}
+                    onClick={isUserTeacher ? () => handleStartSignature(selectedForm, 'teacher') : undefined}
+                    className={`p-3 rounded-xl border transition-all flex items-center gap-2.5 shadow-xs ${
+                      isUserTeacher
+                        ? 'cursor-pointer hover:scale-[1.02] active:scale-95'
+                        : 'cursor-not-allowed opacity-65 select-none'
+                    } ${
+                      selectedForm.isTeacherSigned && !isUserTeacher
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                        : isUserTeacher
+                        ? selectedForm.isTeacherSigned
+                          ? 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-800 ring-2 ring-emerald-500/30'
+                          : 'bg-sky-600 hover:bg-sky-700 text-white border-sky-700 ring-2 ring-sky-500/30'
+                        : selectedForm.isSigned
+                          ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
+                          : 'bg-slate-100 border-slate-200 text-slate-400'
+                    }`}
+                  >
+                    <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
+                      isUserTeacher
+                        ? 'bg-white/20 text-white animate-pulse'
+                        : selectedForm.isTeacherSigned 
+                        ? 'bg-emerald-600 text-white' 
+                        : selectedForm.isSigned
+                          ? 'bg-indigo-700 text-white'
+                          : 'bg-slate-300 text-slate-600'
+                    }`}>
+                      {selectedForm.isTeacherSigned ? '✓' : '4'}
+                    </div>
+                    <div className="min-w-0 text-right">
+                      <h5 className={`font-bold text-[10.5px] leading-tight ${
+                        isUserTeacher ? 'text-white' : 'text-slate-800'
+                      }`}>
+                        {language === 'ar' ? '4. توقيع المعلم' : '4. Teacher Signature'}
+                      </h5>
+                      <span className={`text-[9px] font-sans block truncate mt-0.5 ${
+                        isUserTeacher ? 'text-sky-100' : 'text-slate-500'
+                      }`}>
+                        {isUserTeacher
+                          ? selectedForm.isTeacherSigned
+                            ? (language === 'ar' ? '✓ تم توقيع المعلم بالعلم' : 'Signed by Teacher')
+                            : (language === 'ar' ? 'اضغط لتوقيع المعلم' : 'Click for teacher signature')
+                          : selectedForm.isTeacherSigned 
+                            ? `${language === 'ar' ? 'الموقع بالعلم:' : 'Signed:'} ${selectedForm.teacherSignedName || selectedForm.teacherName}` 
+                            : (language === 'ar' ? 'خاص بالمعلم فقط' : 'Teacher only')}
                       </span>
                     </div>
                   </div>

@@ -146,7 +146,7 @@ export function TeacherUploadsView({
           pdfFile: null,
           base64: '',
           title: '',
-          docType: 'test',
+          docType: '',
           description: '',
           isDragOver: false,
           uploaded: false
@@ -634,32 +634,6 @@ export function TeacherUploadsView({
                               !slot.docType.trim() ? 'border-amber-300 text-slate-800' : 'border-slate-200 text-slate-800'
                             }`}
                           />
-                          {/* Quick suggestion buttons to speed up input while keeping it completely free-form */}
-                          <div className="flex flex-wrap items-center gap-1 pt-1">
-                            <span className="text-[9px] text-slate-400 font-medium">
-                              {language === 'ar' ? 'اقتراحات سريعة:' : 'Quick suggestions:'}
-                            </span>
-                            {(language === 'ar' 
-                              ? ['اختبار قصير أول', 'اختبار قصير ثانٍ', 'امتحان فصلي موحد', 'واجب منزلي', 'مشروع تقييمي', 'ورقة عمل إثرائية']
-                              : ['Quiz 1', 'Quiz 2', 'Unified Exam', 'Homework Task', 'Project Assessment', 'Worksheet']
-                            ).map((suggestion, sIdx) => (
-                              <button
-                                key={`slot-${slot.id}-sug-${suggestion}-${sIdx}`}
-                                type="button"
-                                disabled={slot.uploaded || isSlotLoading}
-                                onClick={() => {
-                                  setSlots(prev => prev.map(s => s.id === slot.id ? { ...s, docType: suggestion } : s));
-                                }}
-                                className={`text-[9px] px-2 py-0.5 rounded-md border transition-all cursor-pointer ${
-                                  slot.docType === suggestion
-                                    ? 'bg-emerald-100 border-emerald-300 text-emerald-800 font-black shadow-2xs'
-                                    : 'bg-slate-50 border-slate-200/80 text-slate-600 hover:bg-slate-100 hover:text-slate-800 font-semibold'
-                                }`}
-                              >
-                                {suggestion}
-                              </button>
-                            ))}
-                          </div>
                         </div>
                       </div>
 
@@ -683,16 +657,17 @@ export function TeacherUploadsView({
                       {/* Complete upload submission inside the slot block */}
                       <div className="flex justify-end pt-1.5 border-t border-slate-100">
                         {slot.uploaded ? (
-                          <div className="flex items-center gap-1.5 text-xs font-black text-emerald-600 bg-emerald-500/10 px-4 py-1.5 rounded-xl">
-                            <CheckCircle className="w-4 h-4" />
-                            <span>{language === 'ar' ? 'تم الرفع والتسجيل بنجاح للوزارة' : 'Uploaded successfully to MOE'}</span>
+                          <div className="flex items-center gap-1.5 text-xs font-black text-emerald-700 bg-emerald-50 border border-emerald-300 px-4 py-1.5 rounded-xl shadow-2xs">
+                            <CheckCircle className="w-4 h-4 text-emerald-600" />
+                            <span>{language === 'ar' ? 'تم الرفع بنجاح للفحص' : 'Uploaded successfully for inspection'}</span>
                           </div>
                         ) : (
                           <button
                             type="button"
-                            disabled={isSlotLoading}
+                            disabled={isSlotLoading || !slot.docType.trim() || !slot.title.trim()}
                             onClick={() => handleUploadSlot(slot.id)}
-                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm shadow-emerald-500/10 transition-all hover:scale-[1.01]"
+                            className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:text-slate-500 disabled:cursor-not-allowed disabled:hover:scale-100 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 cursor-pointer shadow-sm shadow-emerald-500/10 transition-all hover:scale-[1.01]"
+                            title={!slot.docType.trim() ? (language === 'ar' ? 'يرجى كتابة صيغة التقييم الإلزامية أولاً لتفعيل زر الرفع' : 'Please fill assessment type first') : ''}
                           >
                             {isSlotLoading ? (
                               <>

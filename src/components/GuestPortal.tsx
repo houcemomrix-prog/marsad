@@ -44,7 +44,7 @@ interface GuestPortalProps {
     schoolName?: string,
     subject?: string
   ) => Promise<void>;
-  handleAuthForCredentials: (email: string, pass: string) => Promise<void>;
+  handleAuthForCredentials: (email: string, pass: string, roleSelection: 'none' | 'director' | 'teacher' | 'moderator' | 'admin') => Promise<void>;
   handleSignIn: () => Promise<void>;
   authLoading: boolean;
   onLogoClick?: () => void;
@@ -1133,33 +1133,6 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     </button>
                   </div>
                 </div>
-
-                {/* Quick Fill Demo Credentials Helper */}
-                {selectedAuthRole !== 'none' && (
-                  <div className="pt-0.5 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (selectedAuthRole === 'director') {
-                          setLoginEmail('school@moe.om');
-                          setLoginPassword('Skype123@');
-                        } else if (selectedAuthRole === 'teacher') {
-                          setLoginEmail('teacher@moe.om');
-                          setLoginPassword('Skype123@');
-                        } else if (selectedAuthRole === 'moderator') {
-                          setLoginEmail('moderator@moe.om');
-                          setLoginPassword('Skype123@');
-                        } else if (selectedAuthRole === 'admin') {
-                          setLoginEmail('hossam9866@moe.om');
-                          setLoginPassword('Skype123@');
-                        }
-                      }}
-                      className="text-[10px] font-bold text-slate-500 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 px-2.5 py-1 rounded-lg transition-colors cursor-pointer"
-                    >
-                      ⚡ {language === 'ar' ? "تعبئة بيانات حساب التجربة المباشرة" : "Auto-fill Demo Credentials"}
-                    </button>
-                  </div>
-                )}
 
                 <div className="pt-1.5">
                   <button

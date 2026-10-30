@@ -25,7 +25,8 @@ import {
   Check,
   Key,
   ArrowLeftRight,
-  Calendar
+  Calendar,
+  Activity
 } from 'lucide-react';
 import { UserProfile, SchoolReport, TeacherNotification, isDualRoleAccount } from '../types';
 import { getTranslatedText, Language, translateSubject } from '../lib/translations';
@@ -104,8 +105,8 @@ interface HeaderProps {
   onToggleTheme: () => void;
   
   // Optional navigation handlers passed from parent App to coordinate drawer clicks
-  activeTab?: 'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases';
-  setActiveTab?: (tab: 'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases') => void;
+  activeTab?: 'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases' | 'tracker';
+  setActiveTab?: (tab: 'overview' | 'exams' | 'results' | 'standards' | 'settings' | 'archive' | 'databases' | 'tracker') => void;
   showUploadForm?: boolean;
   setShowUploadForm?: (show: boolean) => void;
   adminTab?: 'catalog' | 'stats' | 'plan' | 'database' | 'schools' | 'stamps' | 'signatures' | 'design';
@@ -320,6 +321,18 @@ export function Header({
         {/* MIDDLE SECTION: Horizontal Menu Links (Hidden on small displays) */}
         <nav className="hidden xl:flex items-center gap-2 text-xs font-semibold select-none">
           <span 
+            onClick={() => setActiveTab?.('tracker')}
+            className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'tracker' 
+                ? 'bg-amber-400 text-slate-950 font-black shadow-sm' 
+                : 'bg-white/10 text-amber-200 hover:text-white hover:bg-white/15 border border-amber-300/30'
+            }`}
+          >
+            <span className={`w-2 h-2 rounded-full ${activeTab === 'tracker' ? 'bg-slate-950' : 'bg-emerald-400 animate-ping'}`} />
+            <Activity className="w-3.5 h-3.5" />
+            <span>{language === 'ar' ? 'تتبع الاستمارة' : 'Form Tracker'}</span>
+          </span>
+          <span 
             onClick={() => setActiveTab?.('archive')}
             className={`px-3 py-1.5 rounded-xl transition-all cursor-pointer ${
               activeTab === 'archive' 
@@ -429,51 +442,6 @@ export function Header({
               </>
             )}
           </button>
-
-          {/* System Settings Gear Icon (for sandbox dropdown) */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowSandboxDropdown(!showSandboxDropdown)}
-              className="p-2 text-white/80 hover:text-white hover:bg-white/10 rounded-xl transition-all cursor-pointer"
-              title={t('portalEnvMode')}
-            >
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-            
-            {showSandboxDropdown && (
-              <div className="absolute left-0 mt-2 w-52 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl p-2 z-50 text-xs">
-                <p className="font-bold text-slate-400 p-2 border-b border-slate-800 text-right">{t('portalEnvMode')}</p>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleSandbox(true);
-                    setShowSandboxDropdown(false);
-                  }}
-                  className={`w-full text-right p-2.5 rounded-lg flex items-center gap-2 mt-1 cursor-pointer ${sandboxActive ? 'bg-amber-500 text-slate-950 font-bold' : 'hover:bg-slate-800 text-slate-300'}`}
-                >
-                  <Database className="w-3.5 h-3.5 shrink-0" />
-                  <span>{t('sandboxPrepEnv')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleSandbox(false);
-                    setShowSandboxDropdown(false);
-                  }}
-                  className={`w-full text-right p-2.5 rounded-lg flex items-center gap-2 mt-0.5 cursor-pointer ${!sandboxActive ? 'bg-indigo-650 text-white font-bold' : 'hover:bg-slate-800 text-slate-300'}`}
-                >
-                  <FileCheck className="w-3.5 h-3.5 shrink-0" />
-                  <span>{t('liveOfficialGateway')}</span>
-                </button>
-              </div>
-            )}
-          </div>
 
           {/* Notification Bell Icon */}
           <div className="relative font-sans" ref={notificationsRef}>
@@ -1035,6 +1003,37 @@ export function Header({
                     </button>
                   )}
 
+                  {/* LIVE SYNCHRONIZED FORM TRACKER */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTab?.('tracker');
+                      setIsOpen(false);
+                    }}
+                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                      activeTab === 'tracker'
+                        ? 'bg-emerald-50 text-[#0b5e32] border border-emerald-300 shadow-xs'
+                        : 'text-slate-700 hover:text-[#0b5e32] hover:bg-slate-50 border border-emerald-200/80 bg-emerald-50/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className={`p-1.5 rounded-lg ${
+                        activeTab === 'tracker'
+                          ? 'bg-[#0b5e32] text-white'
+                          : 'bg-emerald-100 text-[#0b5e32]'
+                      }`}>
+                        <Activity className="w-4 h-4" />
+                      </div>
+                      <div className="text-right rtl:text-right ltr:text-left">
+                        <span className="block font-black">{language === 'en' ? 'Live Form Tracker' : 'تتبع الاستمارة (متزامن)'}</span>
+                        <span className="text-[10px] text-emerald-700 font-semibold block">
+                          {language === 'en' ? 'Real-time 4-stage form status' : 'متابعة حالة الاستمارة لحظياً لجميع الحسابات'}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                  </button>
+
                   {/* CERTIFIED SIGNED ARCHIVE */}
                   <button
                     type="button"
@@ -1241,47 +1240,6 @@ export function Header({
               )}
             </div>
 
-            {/* Environment Selector: Sandbox vs Live */}
-            <div className="space-y-2">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-sans block px-1">
-                {t('portalEnvMode')}
-              </label>
-              <div className="grid grid-cols-2 gap-2 bg-slate-50 p-1.5 rounded-2xl border border-slate-200/70">
-                <button
-                  type="button"
-                  onClick={() => {
-                    onToggleSandbox(true);
-                  }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    sandboxActive 
-                      ? 'bg-amber-500 text-slate-950 shadow-xs font-bold' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                  }`}
-                >
-                  <Database className="w-3.5 h-3.5" />
-                  <span>{t('sandboxPrepEnv')}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onToggleSandbox(false);
-                    setIsOpen(false);
-                  }}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-                    !sandboxActive 
-                      ? 'bg-[#0b5e32] text-white shadow-xs font-bold' 
-                      : 'text-slate-600 hover:text-slate-900 hover:bg-white'
-                  }`}
-                >
-                  <ShieldCheck className="w-3.5 h-3.5" />
-                  <span>{t('liveOfficialGateway')}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Session Preset Role Switcher (If in Sandbox) */}
-            {/* Account Switcher removed as sandbox mode is being phased out */}
-
             {/* Profile / Account details */}
             <div className="space-y-2.5 pt-3 border-t border-slate-100">
               <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 font-sans block px-1">
@@ -1346,7 +1304,7 @@ export function Header({
                       <ArrowLeftRight className="w-4 h-4 text-slate-950" />
                       <span>
                         {userProfile.role === 'admin'
-                          ? (language === 'ar' ? 'التبديل إلى: فاحص ومعتمد اللغة الإنجليزية' : 'Switch to: English Language Examiner')
+                          ? (language === 'ar' ? 'التبديل الى: فاحص اللغة الانجليزية' : 'Switch to: English Language Examiner')
                           : (language === 'ar' ? 'التبديل إلى: مدير النظام' : 'Switch to: System Administrator')}
                       </span>
                     </button>
