@@ -13,13 +13,23 @@ import {
   BookOpen,
   Calendar,
   ArrowLeft,
+  ArrowRight,
   Eye,
   Sparkles,
   Check,
   AlertCircle,
   Filter,
   QrCode,
-  Stamp
+  Stamp,
+  Folder,
+  FolderOpen,
+  ChevronLeft,
+  ChevronRight,
+  Layers,
+  Home,
+  LayoutGrid,
+  List,
+  Building2
 } from 'lucide-react';
 import { ArchivedForm, UserProfile } from '../types';
 import { translateSubject, translateGrade, isSubjectMatch, isUniversalSubject } from '../lib/translations';
@@ -159,6 +169,30 @@ export function FormTrackerView({
     new Date().toLocaleTimeString('ar-OM', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   );
 
+  // Folder navigation and view mode state
+  const [viewMode, setViewMode] = useState<'folders' | 'list'>('folders');
+  const [openedSchoolFolder, setOpenedSchoolFolder] = useState<string | null>(null);
+  const [openedSubjectFolder, setOpenedSubjectFolder] = useState<string | null>(null);
+
+  // Today's ISO date string
+  const todayIso = useMemo(() => new Date().toISOString().split('T')[0], []);
+
+  // Available unique dates from forms
+  const availableDates = useMemo(() => {
+    const set = new Set<string>();
+    archivedForms.forEach((f) => {
+      const d = f.visitDate || (f.createdAt ? f.createdAt.split('T')[0] : '');
+      if (d) set.add(d);
+    });
+    return Array.from(set).sort().reverse();
+  }, [archivedForms]);
+
+  // Selected date filter (defaults to today if present, or first available date, or 'all')
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string>(() => {
+    if (availableDates.includes(todayIso)) return todayIso;
+    return availableDates[0] || 'all';
+  });
+
   // Update sync timestamp whenever archivedForms changes in real time
   useEffect(() => {
     setLastSyncTime(
@@ -246,6 +280,97 @@ export function FormTrackerView({
 
     return archivedForms;
   }, [archivedForms, userProfile]);
+
+  // Forms filtered by date selector ("في ذلك اليوم")
+  const dateFilteredForms = useMemo(() => {
+    return roleScopedForms.filter((f) => {
+      if (selectedDateFilter === 'all') return true;
+      const formDate = f.visitDate || (f.createdAt ? f.createdAt.split('T')[0] : '');
+      return formDate === selectedDateFilter;
+    });
+  }, [roleScopedForms, selectedDateFilter]);
+
+  // Level 1: Schools with forms on the selected date
+  const schoolFoldersData = useMemo(() => {
+    const map = new Map<string, ArchivedForm[]>();
+    dateFilteredForms.forEach((f) => {
+      const s = f.schoolName || 'مدرسة غير محددة';
+      if (!map.has(s)) map.set(s, []);
+      map.get(s)!.push(f);
+    });
+
+    return Array.from(map.entries()).map(([schoolName, forms]) => {
+      const subjectsMap = new Map<string, number>();
+      forms.forEach((form) => {
+        const subj = form.subjectName || form.subject || 'عام';
+        subjectsMap.set(subj, (subjectsMap.get(subj) || 0) + 1);
+      });
+      return {
+        schoolName,
+        totalForms: forms.length,
+        subjectsCount: subjectsMap.size,
+        forms,
+        subjectsMap
+      };
+    });
+  }, [dateFilteredForms]);
+
+  // Level 2: Subject cards in selected school folder with form counts
+  const selectedSchoolData = useMemo(() => {
+    if (!openedSchoolFolder) return null;
+    const schoolForms = dateFilteredForms.filter(
+      (f) => (f.schoolName || 'مدرسة غير محددة') === openedSchoolFolder
+    );
+
+    // Standard curriculum subjects list
+    const standardSubjects = [
+      'الرياضيات',
+      'العلوم',
+      'اللغة العربية',
+      'اللغة الإنجليزية',
+      'الدراسات الاجتماعية',
+      'التربية الإسلامية',
+      'الفيزياء',
+      'الكيمياء',
+      'الأحياء',
+      'المهارات الحياتية',
+      'الفنون التشكيلية',
+      'المهارات الموسيقية',
+      'تقنية المعلومات',
+      'الرياضة المدرسية'
+    ];
+
+    const subjectsMap = new Map<string, ArchivedForm[]>();
+    schoolForms.forEach((f) => {
+      const subj = f.subjectName || f.subject || 'عام';
+      if (!subjectsMap.has(subj)) subjectsMap.set(subj, []);
+      subjectsMap.get(subj)!.push(f);
+    });
+
+    // Merge standard list with any actual subjects in forms
+    const allSubjectNames = Array.from(
+      new Set([...standardSubjects, ...Array.from(subjectsMap.keys())])
+    );
+
+    const subjectCards = allSubjectNames.map((subj) => {
+      const forms = subjectsMap.get(subj) || [];
+      return {
+        subjectName: subj,
+        formsCount: forms.length,
+        forms
+      };
+    });
+
+    // Sort subjects so those with forms appear first
+    subjectCards.sort((a, b) => b.formsCount - a.formsCount);
+
+    return {
+      schoolName: openedSchoolFolder,
+      totalForms: schoolForms.length,
+      forms: schoolForms,
+      subjectCards
+    };
+  }, [openedSchoolFolder, dateFilteredForms]);
 
   const uniqueSchools = useMemo(
     () => Array.from(new Set(roleScopedForms.map((f) => f.schoolName).filter(Boolean))),
@@ -575,72 +700,690 @@ export function FormTrackerView({
         </button>
       </div>
 
-      {/* Search & Filters Bar */}
-      <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-col md:flex-row items-stretch md:items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-400 absolute top-1/2 -translate-y-1/2 right-3.5 rtl:right-3.5 ltr:left-3.5" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder={
-              language === 'ar'
-                ? 'ابحث باسم المعلم، المدرسة، المادة، الرقم الوظيفي، أو رمز الاستمارة...'
-                : 'Search by teacher name, school, subject, file number, or form ID...'
-            }
-            className="w-full pr-10 pl-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0b5e32] focus:bg-white transition-all"
-          />
+      {/* View Mode Toolbar & Date Selection Bar ("في ذلك اليوم") */}
+      <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+        {/* Toggle View Mode Buttons */}
+        <div className="flex items-center p-1 bg-slate-100 rounded-xl">
+          <button
+            type="button"
+            onClick={() => setViewMode('folders')}
+            className={`px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
+              viewMode === 'folders'
+                ? 'bg-[#0b5e32] text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <FolderOpen className="w-4 h-4 text-amber-300" />
+            <span>
+              {language === 'ar' ? 'مجلدات المدارس والمواد (تتبع اليوم)' : 'School & Subject Folders'}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
+              viewMode === 'list'
+                ? 'bg-slate-900 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <List className="w-4 h-4 text-amber-300" />
+            <span>{language === 'ar' ? 'القائمة المباشرة الشاملة' : 'Full Pipeline List'}</span>
+          </button>
         </div>
 
-        <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5">
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-            <School className="w-4 h-4 text-slate-500 shrink-0" />
-            <select
-              value={schoolFilter}
-              onChange={(e) => setSchoolFilter(e.target.value)}
-              className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
-            >
-              <option value="all">{language === 'ar' ? 'جميع المدارس' : 'All Schools'}</option>
-              {uniqueSchools.map((sch) => (
-                <option key={sch} value={sch}>
-                  {sch}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
-            <BookOpen className="w-4 h-4 text-slate-500 shrink-0" />
-            <select
-              value={subjectFilter}
-              onChange={(e) => setSubjectFilter(e.target.value)}
-              className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
-            >
-              <option value="all">{language === 'ar' ? 'جميع المواد' : 'All Subjects'}</option>
-              {uniqueSubjects.map((subj) => (
-                <option key={subj} value={subj}>
-                  {translateSubject(subj, language)}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {(stageFilter !== 'all' || schoolFilter !== 'all' || subjectFilter !== 'all' || searchQuery) && (
-            <button
-              type="button"
-              onClick={() => {
-                setStageFilter('all');
-                setSchoolFilter('all');
-                setSubjectFilter('all');
-                setSearchQuery('');
-              }}
-              className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-black cursor-pointer transition-colors shrink-0"
-            >
-              {language === 'ar' ? 'إعادة ضبط' : 'Reset'}
-            </button>
-          )}
+        {/* Date Selector Bar for "في ذلك اليوم" */}
+        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2">
+          <Calendar className="w-4 h-4 text-[#0b5e32] shrink-0" />
+          <span className="text-xs font-black text-slate-700 shrink-0">
+            {language === 'ar' ? 'تاريخ الاستمارات (في ذلك اليوم):' : 'Date Filter:'}
+          </span>
+          <select
+            value={selectedDateFilter}
+            onChange={(e) => {
+              setSelectedDateFilter(e.target.value);
+              setOpenedSchoolFolder(null);
+              setOpenedSubjectFolder(null);
+            }}
+            className="bg-transparent text-xs font-black text-slate-900 focus:outline-none cursor-pointer"
+          >
+            <option value="all">{language === 'ar' ? 'جميع الأيام' : 'All Dates'}</option>
+            {availableDates.map((dateStr) => (
+              <option key={dateStr} value={dateStr}>
+                {dateStr === todayIso ? `اليوم (${dateStr})` : dateStr}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
+
+      {viewMode === 'folders' ? (
+        <div className="space-y-6">
+          {/* LEVEL 1: School Folders Grid */}
+          {!openedSchoolFolder ? (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200/80 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-xl bg-amber-100 text-amber-800 flex items-center justify-center font-black">
+                    <Folder className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-900">
+                      {language === 'ar'
+                        ? 'مجلدات المدارس التي لديها استمارات'
+                        : 'School Field Folders'}
+                    </h3>
+                    <p className="text-xs text-slate-500 font-bold">
+                      {language === 'ar'
+                        ? `تاريخ اليوم المختار: (${selectedDateFilter === 'all' ? 'جميع الأيام' : selectedDateFilter})`
+                        : `Selected Date: ${selectedDateFilter}`}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-xs font-black text-emerald-800 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200">
+                  {schoolFoldersData.length}{' '}
+                  {language === 'ar' ? 'مدرسة نشطة اليوم' : 'Active Schools Today'}
+                </span>
+              </div>
+
+              {schoolFoldersData.length === 0 ? (
+                <div className="bg-white rounded-3xl p-10 text-center border border-slate-200/80 shadow-xs space-y-3">
+                  <FolderOpen className="w-12 h-12 text-slate-300 mx-auto" />
+                  <h4 className="text-sm font-black text-slate-700">
+                    {language === 'ar'
+                      ? 'لا توجد مدارس تحتوي على استمارات في هذا اليوم المحدد'
+                      : 'No schools found with forms for this selected date'}
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    {language === 'ar'
+                      ? 'اختر تاريخاً آخر من القائمة أو اختر "جميع الأيام" لعرض مجلدات المدارس.'
+                      : 'Select another date or "All Dates" to view school folders.'}
+                  </p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                  {schoolFoldersData.map((sch) => (
+                    <button
+                      key={sch.schoolName}
+                      type="button"
+                      onClick={() => {
+                        setOpenedSchoolFolder(sch.schoolName);
+                        setOpenedSubjectFolder(null);
+                      }}
+                      className="bg-white hover:bg-amber-50/30 border-2 border-amber-200/80 hover:border-amber-400 rounded-3xl p-5 shadow-sm hover:shadow-md transition-all text-right rtl:text-right ltr:text-left cursor-pointer group relative overflow-hidden flex flex-col justify-between"
+                    >
+                      <div className="absolute top-0 right-0 left-0 h-2 bg-gradient-to-r from-amber-400 via-amber-500 to-emerald-600" />
+
+                      <div>
+                        <div className="flex items-center justify-between mb-3 pt-1">
+                          <div className="w-12 h-12 rounded-2xl bg-amber-100/80 text-amber-700 flex items-center justify-center group-hover:scale-110 transition-transform shadow-xs">
+                            <Folder className="w-6 h-6 fill-amber-400 text-amber-700" />
+                          </div>
+                          <span className="px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-black rounded-full border border-emerald-300">
+                            {sch.totalForms} {language === 'ar' ? 'استمارة' : 'Forms'}
+                          </span>
+                        </div>
+
+                        <h4 className="text-base font-black text-slate-900 mb-1 group-hover:text-[#0b5e32] transition-colors">
+                          {sch.schoolName}
+                        </h4>
+
+                        <div className="flex items-center gap-2 text-xs font-bold text-slate-500 mt-2">
+                          <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>
+                            {language === 'ar'
+                              ? `تضم (${sch.subjectsCount}) مواد بها استمارات`
+                              : `Contains (${sch.subjectsCount}) subjects`}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-black text-[#0b5e32]">
+                        <span>{language === 'ar' ? 'فتح مجلد المدرسة' : 'Open School Folder'}</span>
+                        <ChevronLeft className="w-4 h-4 rtl:rotate-0 ltr:rotate-180 group-hover:-translate-x-1 transition-transform" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : !openedSubjectFolder ? (
+            /* LEVEL 2: Subject Cards inside Opened School Folder with Corner Floating Badge */
+            <div className="space-y-5">
+              {/* Breadcrumb Navigation */}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenedSchoolFolder(null);
+                      setOpenedSubjectFolder(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl cursor-pointer transition-all"
+                  >
+                    <Home className="w-3.5 h-3.5" />
+                    <span>{language === 'ar' ? 'جميع مجلدات المدارس' : 'All Schools'}</span>
+                  </button>
+                  <ChevronLeft className="w-4 h-4 text-slate-400 rtl:rotate-0 ltr:rotate-180" />
+                  <span className="inline-flex items-center gap-1.5 text-emerald-800 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-200">
+                    <FolderOpen className="w-4 h-4 text-amber-500" />
+                    <span>{openedSchoolFolder}</span>
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setOpenedSchoolFolder(null)}
+                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-0 ltr:rotate-180" />
+                  <span>{language === 'ar' ? 'العودة لقائمة المدارس' : 'Back to Schools'}</span>
+                </button>
+              </div>
+
+              {/* School Banner */}
+              <div className="bg-gradient-to-r from-amber-700 via-amber-800 to-amber-900 text-white rounded-3xl p-5 shadow-md flex items-center justify-between">
+                <div>
+                  <h3 className="text-lg font-black">{openedSchoolFolder}</h3>
+                  <p className="text-xs text-amber-100/90 mt-1">
+                    {language === 'ar'
+                      ? 'اختر المادة لمعاينة الاستمارات. المادة التي تحتوي على استمارات يظهر في ركنها دائرة صغيرة بها عدد الاستمارات.'
+                      : 'Select a subject to view forms. Subjects with forms display a floating circle badge on the corner.'}
+                  </p>
+                </div>
+                <div className="text-left rtl:text-left ltr:text-right">
+                  <span className="text-2xl font-black font-mono">{selectedSchoolData?.totalForms || 0}</span>
+                  <div className="text-[11px] font-bold text-amber-200">
+                    {language === 'ar' ? 'إجمالي الاستمارات' : 'Total Forms'}
+                  </div>
+                </div>
+              </div>
+
+              {/* Subject Cards Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4 pt-2">
+                {selectedSchoolData?.subjectCards.map((subj) => {
+                  const hasForms = subj.formsCount > 0;
+
+                  return (
+                    <button
+                      key={subj.subjectName}
+                      type="button"
+                      disabled={!hasForms}
+                      onClick={() => setOpenedSubjectFolder(subj.subjectName)}
+                      className={`relative p-5 rounded-3xl border-2 text-right rtl:text-right ltr:text-left transition-all flex flex-col justify-between ${
+                        hasForms
+                          ? 'bg-white hover:bg-indigo-50/40 border-indigo-300 hover:border-indigo-500 shadow-md hover:shadow-lg cursor-pointer scale-[1.01]'
+                          : 'bg-slate-50/70 border-slate-200/80 text-slate-400 opacity-60 cursor-not-allowed'
+                      }`}
+                    >
+                      {/* CORNER FLOATING CIRCULAR BADGE SHOWING FORM COUNT */}
+                      {hasForms && (
+                        <div className="absolute -top-3 -right-3 rtl:-right-3 ltr:-left-3 z-20 w-8 h-8 rounded-full bg-rose-600 text-white font-black text-xs flex items-center justify-center shadow-lg ring-4 ring-white border border-rose-700 animate-bounce">
+                          {subj.formsCount}
+                        </div>
+                      )}
+
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <div
+                            className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black ${
+                              hasForms ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-200 text-slate-400'
+                            }`}
+                          >
+                            <BookOpen className="w-5 h-5" />
+                          </div>
+                          {hasForms && (
+                            <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                              {language === 'ar' ? 'نشطة' : 'Active'}
+                            </span>
+                          )}
+                        </div>
+
+                        <h4 className="text-sm font-black text-slate-900 mb-1">
+                          {subj.subjectName}
+                        </h4>
+                        <p className="text-[11px] font-bold text-slate-500">
+                          {translateSubject(subj.subjectName, 'en')}
+                        </p>
+                      </div>
+
+                      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-black">
+                        {hasForms ? (
+                          <>
+                            <span className="text-indigo-800">
+                              {language === 'ar' ? `استعراض (${subj.formsCount}) استمارة` : `View (${subj.formsCount}) forms`}
+                            </span>
+                            <ChevronLeft className="w-4 h-4 text-indigo-600 rtl:rotate-0 ltr:rotate-180" />
+                          </>
+                        ) : (
+                          <span className="text-slate-400 text-[11px]">
+                            {language === 'ar' ? 'لا توجد استمارات اليوم' : 'No forms today'}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            /* LEVEL 3: Forms List for Opened School + Opened Subject */
+            <div className="space-y-5">
+              {/* Breadcrumbs Navigation */}
+              <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 text-xs font-black text-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpenedSchoolFolder(null);
+                      setOpenedSubjectFolder(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 text-slate-500 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-xl cursor-pointer transition-all"
+                  >
+                    <Home className="w-3.5 h-3.5" />
+                    <span>{language === 'ar' ? 'جميع المدارس' : 'All Schools'}</span>
+                  </button>
+                  <ChevronLeft className="w-4 h-4 text-slate-400 rtl:rotate-0 ltr:rotate-180" />
+                  <button
+                    type="button"
+                    onClick={() => setOpenedSubjectFolder(null)}
+                    className="inline-flex items-center gap-1.5 text-amber-900 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-xl cursor-pointer transition-all border border-amber-200"
+                  >
+                    <FolderOpen className="w-4 h-4 text-amber-500" />
+                    <span>{openedSchoolFolder}</span>
+                  </button>
+                  <ChevronLeft className="w-4 h-4 text-slate-400 rtl:rotate-0 ltr:rotate-180" />
+                  <span className="inline-flex items-center gap-1.5 text-indigo-900 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-200">
+                    <BookOpen className="w-4 h-4 text-indigo-600" />
+                    <span>{openedSubjectFolder}</span>
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setOpenedSubjectFolder(null)}
+                  className="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-0 ltr:rotate-180" />
+                  <span>{language === 'ar' ? 'العودة للمواد' : 'Back to Subjects'}</span>
+                </button>
+              </div>
+
+              {/* Render Form Cards for this school + subject */}
+              {(() => {
+                const targetForms = dateFilteredForms.filter(
+                  (f) =>
+                    (f.schoolName || 'مدرسة غير محددة') === openedSchoolFolder &&
+                    (f.subjectName || f.subject || 'عام') === openedSubjectFolder
+                );
+
+                if (targetForms.length === 0) {
+                  return (
+                    <div className="bg-white rounded-3xl p-10 text-center border border-slate-200 shadow-xs">
+                      <p className="text-sm font-black text-slate-700">
+                        {language === 'ar' ? 'لا توجد استمارات لهذه المادة حالياً' : 'No forms for this subject'}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="space-y-5">
+                    {targetForms.map((form) => {
+                      const computed = getFormComputedStage(form);
+
+                      const step1Done =
+                        Boolean(form.isExaminerSigned) ||
+                        form.workflowStage === 'examiner_submitted_to_admin' ||
+                        form.workflowStage === 'admin_transferred_to_principal' ||
+                        form.workflowStage === 'principal_signed_transferred_to_teacher' ||
+                        form.workflowStage === 'completed' ||
+                        Boolean(form.isSigned) ||
+                        Boolean(form.isTeacherSigned);
+
+                      const step2Done =
+                        form.workflowStage === 'admin_transferred_to_principal' ||
+                        form.workflowStage === 'principal_signed_transferred_to_teacher' ||
+                        form.workflowStage === 'completed' ||
+                        Boolean(form.adminReviewedBy) ||
+                        Boolean(form.adminReviewedAt) ||
+                        Boolean(form.isSigned) ||
+                        Boolean(form.isTeacherSigned);
+
+                      const step3Done =
+                        form.workflowStage === 'principal_signed_transferred_to_teacher' ||
+                        form.workflowStage === 'completed' ||
+                        Boolean(form.isSigned) ||
+                        Boolean(form.isTeacherSigned);
+
+                      const step4Done =
+                        form.workflowStage === 'completed' ||
+                        (Boolean(form.isSigned) && Boolean(form.isTeacherSigned)) ||
+                        Boolean(form.isTeacherSigned);
+
+                      const canAdminTransfer = userProfile?.role === 'admin' && !step2Done;
+                      const canPrincipalSign =
+                        userProfile?.role === 'school' &&
+                        userProfile?.roleType === 'administrative' &&
+                        step2Done &&
+                        !step3Done;
+                      const canTeacherSign =
+                        userProfile?.role === 'school' &&
+                        userProfile?.roleType === 'teacher' &&
+                        step3Done &&
+                        !step4Done;
+                      const canExaminerSign = userProfile?.role === 'moderator' && !form.isExaminerSigned;
+
+                      return (
+                        <div
+                          key={form.id}
+                          className="bg-white rounded-3xl border border-slate-200/90 shadow-md hover:shadow-lg transition-all overflow-hidden"
+                        >
+                          {/* Top Card Header */}
+                          <div className="px-5 py-4 bg-slate-50/90 border-b border-slate-200/80 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <div className="w-11 h-11 rounded-2xl bg-[#821315] text-white font-black flex items-center justify-center text-base shadow-xs shrink-0">
+                                {(form.teacherName || 'أ')[0]}
+                              </div>
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <h3 className="text-sm sm:text-base font-black text-slate-900">
+                                    {language === 'ar'
+                                      ? `استمارة الفحص والتدقيق — ${form.teacherName || 'أ. معلم المادة'}`
+                                      : `Audit Form — ${form.teacherName || 'Teacher'}`}
+                                  </h3>
+                                  <span className={`px-3 py-0.5 rounded-full text-[11px] font-black border ${computed.badgeColor}`}>
+                                    {language === 'ar' ? computed.labelAr : computed.labelEn}
+                                  </span>
+                                  {form.conformanceStatus && (
+                                    <span
+                                      className={`px-2.5 py-0.5 rounded-full text-[10.5px] font-black border ${
+                                        form.conformanceStatus === 'conforming'
+                                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                          : 'bg-rose-50 text-rose-800 border-rose-200'
+                                      }`}
+                                    >
+                                      {form.conformanceStatus === 'conforming'
+                                        ? language === 'ar'
+                                          ? '✓ استمارة مطابقة'
+                                          : '✓ Conforming'
+                                        : language === 'ar'
+                                        ? '⚠ استمارة غير مطابقة'
+                                        : '⚠ Non-Conforming'}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 font-bold mt-1">
+                                  <span className="inline-flex items-center gap-1 text-slate-700">
+                                    <School className="w-3.5 h-3.5 text-[#0b5e32]" />
+                                    {form.schoolName}
+                                  </span>
+                                  <span>•</span>
+                                  <span className="inline-flex items-center gap-1 text-indigo-800 bg-indigo-50 px-2 py-0.5 rounded-md">
+                                    <BookOpen className="w-3.5 h-3.5" />
+                                    {translateSubject(form.subjectName || form.subject, language)}
+                                  </span>
+                                  {form.grade && (
+                                    <>
+                                      <span>•</span>
+                                      <span className="bg-slate-200/70 text-slate-800 px-2 py-0.5 rounded-md">
+                                        {translateGrade(form.grade, language)}
+                                      </span>
+                                    </>
+                                  )}
+                                  <span>•</span>
+                                  <span className="inline-flex items-center gap-1 text-slate-500 font-mono text-[11px]">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    {form.visitDate || formatSafeDate(form.createdAt)}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Quick Action Buttons */}
+                            <div className="flex flex-wrap items-center gap-2.5 self-start lg:self-center">
+                              <div className="flex items-center gap-2 bg-white px-3 py-1.5 rounded-xl border border-slate-200 shadow-2xs">
+                                <span className="text-[11px] font-bold text-slate-500">
+                                  {language === 'ar' ? 'نسبة الإنجاز:' : 'Progress:'}
+                                </span>
+                                <span className="text-sm font-black font-mono text-[#0b5e32]">
+                                  {computed.progressPercent}%
+                                </span>
+                              </div>
+
+                              {canAdminTransfer && (
+                                <button
+                                  type="button"
+                                  disabled={processingFormId === form.id}
+                                  onClick={() => handleQuickAdminTransfer(form)}
+                                  className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-slate-950 font-black text-xs rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <Send className="w-3.5 h-3.5" />
+                                  <span>
+                                    {processingFormId === form.id
+                                      ? language === 'ar'
+                                        ? 'جاري التحويل...'
+                                        : 'Transferring...'
+                                      : language === 'ar'
+                                      ? 'تحويل لمدير المدرسة الآن'
+                                      : 'Transfer to Principal Now'}
+                                  </span>
+                                </button>
+                              )}
+
+                              {canPrincipalSign && (
+                                <button
+                                  type="button"
+                                  disabled={processingFormId === form.id}
+                                  onClick={() => handleQuickPrincipalSign(form)}
+                                  className="px-4 py-2 bg-blue-700 hover:bg-blue-800 disabled:opacity-50 text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <Stamp className="w-3.5 h-3.5" />
+                                  <span>
+                                    {processingFormId === form.id
+                                      ? language === 'ar'
+                                        ? 'جاري الاعتماد والختم...'
+                                        : 'Signing & Stamping...'
+                                      : language === 'ar'
+                                      ? 'توقيع وختم وتحويل للمعلم'
+                                      : 'Sign, Stamp & Forward'}
+                                  </span>
+                                </button>
+                              )}
+
+                              {canTeacherSign && (
+                                <button
+                                  type="button"
+                                  disabled={processingFormId === form.id}
+                                  onClick={() => handleQuickTeacherSign(form)}
+                                  className="px-4 py-2 bg-indigo-700 hover:bg-indigo-800 disabled:opacity-50 text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  <span>
+                                    {processingFormId === form.id
+                                      ? language === 'ar'
+                                        ? 'جاري التوقيع...'
+                                        : 'Signing...'
+                                      : language === 'ar'
+                                      ? 'توقيع المعلم بالعلم الآن'
+                                      : 'Sign as Teacher'}
+                                  </span>
+                                </button>
+                              )}
+
+                              {canExaminerSign && (
+                                <button
+                                  type="button"
+                                  disabled={processingFormId === form.id}
+                                  onClick={() => handleQuickExaminerSign(form)}
+                                  className="px-4 py-2 bg-[#0b5e32] hover:bg-[#094b28] disabled:opacity-50 text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <ShieldCheck className="w-3.5 h-3.5" />
+                                  <span>
+                                    {processingFormId === form.id
+                                      ? language === 'ar'
+                                        ? 'جاري التوقيع...'
+                                        : 'Signing...'
+                                      : language === 'ar'
+                                      ? 'توقيع الفاحص وإرسال للنظام'
+                                      : 'Sign as Examiner'}
+                                  </span>
+                                </button>
+                              )}
+
+                              {onOpenInArchive && (
+                                <button
+                                  type="button"
+                                  onClick={() => onOpenInArchive(form)}
+                                  className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-black text-xs rounded-xl cursor-pointer shadow-xs transition-all flex items-center gap-1.5 active:scale-95"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-amber-300" />
+                                  <span>{language === 'ar' ? 'معاينة الاستمارة الرسمية' : 'View Official Form'}</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* 4-Stage Visual Pipeline Grid */}
+                          <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                            {/* Stage 1 */}
+                            <div className={`p-4 rounded-2xl border-2 transition-all relative ${step1Done ? 'bg-emerald-50/40 border-emerald-400/80' : 'bg-slate-50/60 border-slate-200'}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="px-2.5 py-0.5 rounded-lg text-[10.5px] font-black bg-white border border-slate-200 text-slate-700">المرحلة 1</span>
+                                {step1Done ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full"><Check className="w-3.5 h-3.5" />مكتملة</span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-black text-rose-700 bg-rose-100 px-2.5 py-0.5 rounded-full animate-pulse"><Clock className="w-3 h-3" />جاري العمل</span>
+                                )}
+                              </div>
+                              <h4 className="text-xs font-black text-slate-900 mb-1">1. توقيع الفاحص</h4>
+                              <p className="text-[11px] font-bold text-slate-700 truncate">{form.examinerSignedName || form.examinerName || 'الفاحص'}</p>
+                            </div>
+
+                            {/* Stage 2 */}
+                            <div className={`p-4 rounded-2xl border-2 transition-all relative ${step2Done ? 'bg-emerald-50/40 border-emerald-400/80' : 'bg-slate-50/60 border-slate-200'}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="px-2.5 py-0.5 rounded-lg text-[10.5px] font-black bg-white border border-slate-200 text-slate-700">المرحلة 2</span>
+                                {step2Done ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full"><Check className="w-3.5 h-3.5" />تم التحويل</span>
+                                ) : (
+                                  <span className="text-[10.5px] font-bold text-slate-400">بالانتظار</span>
+                                )}
+                              </div>
+                              <h4 className="text-xs font-black text-slate-900 mb-1">2. تحويل مدير النظام</h4>
+                              <p className="text-[11px] font-bold text-slate-700 truncate">{step2Done ? form.adminReviewedBy || 'مدير النظام' : 'بانتظار تحويل المدير'}</p>
+                            </div>
+
+                            {/* Stage 3 */}
+                            <div className={`p-4 rounded-2xl border-2 transition-all relative ${step3Done ? 'bg-emerald-50/40 border-emerald-400/80' : 'bg-slate-50/60 border-slate-200'}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="px-2.5 py-0.5 rounded-lg text-[10.5px] font-black bg-white border border-slate-200 text-slate-700">المرحلة 3</span>
+                                {step3Done ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full"><Check className="w-3.5 h-3.5" />مختومة وموقعة</span>
+                                ) : (
+                                  <span className="text-[10.5px] font-bold text-slate-400">بالانتظار</span>
+                                )}
+                              </div>
+                              <h4 className="text-xs font-black text-slate-900 mb-1">3. توقيع وختم المدير</h4>
+                              <p className="text-[11px] font-bold text-slate-700 truncate">{step3Done ? form.signedByPrincipalName || form.principalName || 'مدير المدرسة' : 'مدير المدرسة'}</p>
+                            </div>
+
+                            {/* Stage 4 */}
+                            <div className={`p-4 rounded-2xl border-2 transition-all relative ${step4Done ? 'bg-emerald-50/40 border-emerald-400/80' : 'bg-slate-50/60 border-slate-200'}`}>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="px-2.5 py-0.5 rounded-lg text-[10.5px] font-black bg-white border border-slate-200 text-slate-700">المرحلة 4</span>
+                                {step4Done ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-black text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full"><Check className="w-3.5 h-3.5" />توقيع المعلم بالعلم</span>
+                                ) : (
+                                  <span className="text-[10.5px] font-bold text-slate-400">بالانتظار</span>
+                                )}
+                              </div>
+                              <h4 className="text-xs font-black text-slate-900 mb-1">4. توقيع المعلم بالعلم</h4>
+                              <p className="text-[11px] font-bold text-slate-700 truncate">{form.teacherSignedName || form.teacherName || 'معلم المادة'}</p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* FLAT LIST MODE */
+        <div className="space-y-4">
+          {/* Search & Filters Bar */}
+          <div className="bg-white rounded-2xl p-4 border border-slate-200/90 shadow-xs flex flex-col md:flex-row items-stretch md:items-center gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute top-1/2 -translate-y-1/2 right-3.5 rtl:right-3.5 ltr:left-3.5" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  language === 'ar'
+                    ? 'ابحث باسم المعلم، المدرسة، المادة، الرقم الوظيفي، أو رمز الاستمارة...'
+                    : 'Search by teacher name, school, subject, file number, or form ID...'
+                }
+                className="w-full pr-10 pl-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-[#0b5e32] focus:bg-white transition-all"
+              />
+            </div>
+
+            <div className="flex flex-wrap sm:flex-nowrap items-center gap-2.5">
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                <School className="w-4 h-4 text-slate-500 shrink-0" />
+                <select
+                  value={schoolFilter}
+                  onChange={(e) => setSchoolFilter(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
+                >
+                  <option value="all">{language === 'ar' ? 'جميع المدارس' : 'All Schools'}</option>
+                  {uniqueSchools.map((sch) => (
+                    <option key={sch} value={sch}>
+                      {sch}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2">
+                <BookOpen className="w-4 h-4 text-slate-500 shrink-0" />
+                <select
+                  value={subjectFilter}
+                  onChange={(e) => setSubjectFilter(e.target.value)}
+                  className="bg-transparent text-xs font-bold text-slate-700 focus:outline-none cursor-pointer"
+                >
+                  <option value="all">{language === 'ar' ? 'جميع المواد' : 'All Subjects'}</option>
+                  {uniqueSubjects.map((subj) => (
+                    <option key={subj} value={subj}>
+                      {translateSubject(subj, language)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {(stageFilter !== 'all' || schoolFilter !== 'all' || subjectFilter !== 'all' || searchQuery) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStageFilter('all');
+                    setSchoolFilter('all');
+                    setSubjectFilter('all');
+                    setSearchQuery('');
+                  }}
+                  className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-black cursor-pointer transition-colors shrink-0"
+                >
+                  {language === 'ar' ? 'إعادة ضبط' : 'Reset'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Synchronized Tracked Forms List */}
       {filteredForms.length === 0 ? (
