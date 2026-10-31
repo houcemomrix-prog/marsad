@@ -45,6 +45,7 @@ interface FormTrackerViewProps {
   onOpenInArchive?: (form: ArchivedForm) => void;
   onSelectForm?: (form: ArchivedForm) => void;
   onTransferToPrincipal?: (archiveId: string, adminName: string) => Promise<void>;
+  onTransferToMinistryRep?: (archiveId: string, adminName: string) => Promise<void>;
   onSignPrincipal?: (archiveId: string, principalName: string, qrData: string, stampUrl?: string) => Promise<void>;
   onSignTeacher?: (archiveId: string, teacherName: string, qrData: string) => Promise<void>;
   onSignExaminer?: (
@@ -64,6 +65,36 @@ type TrackerStageFilter =
   | 'stage_3_principal'
   | 'stage_4_teacher'
   | 'completed';
+
+export const isFormFullySigned = (f: ArchivedForm): boolean => {
+  return (
+    (Boolean(f.isTeacherSigned) && Boolean(f.isSigned)) ||
+    f.workflowStage === 'completed' ||
+    (Boolean(f.teacherSignedName) && Boolean(f.signedByPrincipalName))
+  );
+};
+
+export const isFinalInspectionForm = (f: ArchivedForm): boolean => {
+  return (
+    f.assessmentType === 'test' ||
+    f.type === 'test' ||
+    f.grade === 'الصف الثاني عشر' ||
+    f.grade === 'Grade 12' ||
+    Boolean(f.assessmentTitle && f.assessmentTitle.includes('نهائي'))
+  );
+};
+
+export const isFormNonConforming = (f: ArchivedForm): boolean => {
+  return (
+    f.conformanceStatus === 'non-conforming' ||
+    Boolean(f.hasGradeRevisions) ||
+    (Boolean(f.students) && f.students.some(s => Boolean(s.notes && ['1', '2', '3', '4', '5', '6'].includes(s.notes.trim()))))
+  );
+};
+
+export const requiresMinistryRepTransfer = (f: ArchivedForm): boolean => {
+  return isFinalInspectionForm(f) && isFormNonConforming(f) && isFormFullySigned(f);
+};
 
 export function getFormComputedStage(form: ArchivedForm): {
   stageNumber: 1 | 2 | 3 | 4 | 5;
@@ -95,6 +126,19 @@ export function getFormComputedStage(form: ArchivedForm): {
       nextActorAr: 'تم استكمال جميع التواقيع والأرشفة الوزارية',
       nextActorEn: 'All signatures completed and archived',
       badgeColor: 'bg-emerald-100 text-emerald-800 border-emerald-300'
+    };
+  }
+
+  if (form.workflowStage === 'transferred_to_ministry_rep') {
+    return {
+      stageNumber: 2,
+      stageKey: 'stage_2_admin',
+      progressPercent: 35,
+      labelAr: 'المرحلة 2: محولة لممثل الوزارة (فحص نهائي غير مطابق)',
+      labelEn: 'Stage 2: Escalated to Ministry Rep (Non-Conforming Final Exam)',
+      nextActorAr: 'ممثل الوزارة — دراسة التعديلات الفنية وإصدار التوجيهات الوزارية',
+      nextActorEn: 'Ministry Representative — Review Non-Conforming Final Form & Issue Directives',
+      badgeColor: 'bg-purple-100 text-purple-900 border-purple-300'
     };
   }
 
@@ -156,6 +200,7 @@ export function FormTrackerView({
   onRefresh,
   onOpenInArchive,
   onTransferToPrincipal,
+  onTransferToMinistryRep,
   onSignPrincipal,
   onSignTeacher,
   onSignExaminer,
@@ -468,6 +513,22 @@ export function FormTrackerView({
         language === 'ar'
           ? `تم تحويل استمارة (${form.teacherName}) إلى مدير المدرسة (${form.schoolName}) بنجاح وبشكل متزامن!`
           : `Form for (${form.teacherName}) transferred to School Principal in real-time!`
+      );
+    } finally {
+      setProcessingFormId(null);
+    }
+  };
+
+  const handleQuickMinistryRepTransfer = async (form: ArchivedForm) => {
+    if (!onTransferToMinistryRep || !userProfile) return;
+    setProcessingFormId(form.id);
+    try {
+      const adminName = userProfile.name || 'مدير النظام';
+      await onTransferToMinistryRep(form.id, adminName);
+      onSuccess?.(
+        language === 'ar'
+          ? `تم تحويل استمارة الفحص النهائي غير المطابقة للمعلم (${form.teacherName}) إلى ممثل الوزارة بنجاح!`
+          : `Non-conforming final audit form for (${form.teacherName}) escalated to Ministry Representative successfully!`
       );
     } finally {
       setProcessingFormId(null);
@@ -1061,6 +1122,7 @@ export function FormTrackerView({
                         Boolean(form.isSigned) ||
                         Boolean(form.isTeacherSigned);
 
+                      const isTransferredToMinistryRep = form.workflowStage === 'transferred_to_ministry_rep';
                       const step2Done =
                         form.workflowStage === 'admin_transferred_to_principal' ||
                         form.workflowStage === 'principal_signed_transferred_to_teacher' ||
@@ -1068,7 +1130,8 @@ export function FormTrackerView({
                         Boolean(form.adminReviewedBy) ||
                         Boolean(form.adminReviewedAt) ||
                         Boolean(form.isSigned) ||
-                        Boolean(form.isTeacherSigned);
+                        Boolean(form.isTeacherSigned) ||
+                        isTransferredToMinistryRep;
 
                       const step3Done =
                         form.workflowStage === 'principal_signed_transferred_to_teacher' ||
@@ -1081,7 +1144,9 @@ export function FormTrackerView({
                         (Boolean(form.isSigned) && Boolean(form.isTeacherSigned)) ||
                         Boolean(form.isTeacherSigned);
 
+                      const isRequiresMinistryRep = requiresMinistryRepTransfer(form);
                       const canAdminTransfer = userProfile?.role === 'admin' && !step2Done;
+                      const canAdminTransferMinistryRep = userProfile?.role === 'admin' && isRequiresMinistryRep && !isTransferredToMinistryRep && !form.isMinistryRepSigned;
                       const canPrincipalSign =
                         userProfile?.role === 'school' &&
                         userProfile?.roleType === 'administrative' &&
@@ -1171,6 +1236,30 @@ export function FormTrackerView({
                                   {computed.progressPercent}%
                                 </span>
                               </div>
+
+                              {isTransferredToMinistryRep && (
+                                <span className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-purple-50 text-purple-900 border border-purple-300 flex items-center gap-1.5 shadow-2xs">
+                                  <Building2 className="w-3.5 h-3.5 text-purple-700 animate-pulse" />
+                                  <span>{language === 'ar' ? 'محولة لممثل الوزارة' : 'Transferred to Ministry Rep'}</span>
+                                </span>
+                              )}
+
+                              {canAdminTransferMinistryRep && (
+                                <button
+                                  type="button"
+                                  disabled={processingFormId === form.id}
+                                  onClick={() => handleQuickMinistryRepTransfer(form)}
+                                  className="px-4 py-2 bg-purple-800 hover:bg-purple-900 disabled:opacity-50 text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                                  title={language === 'ar' ? 'تحويل لممثل الوزارة لأنها استمارة فحص نهائي غير مطابقة' : 'Escalate to Ministry Rep (Non-conforming final audit)'}
+                                >
+                                  <Building2 className="w-3.5 h-3.5 text-amber-300" />
+                                  <span>
+                                    {processingFormId === form.id
+                                      ? (language === 'ar' ? 'جاري التحويل للوزارة...' : 'Transferring...')
+                                      : (language === 'ar' ? 'تحويل إلى ممثل الوزارة (غير مطابقة)' : 'Transfer to Ministry Rep')}
+                                  </span>
+                                </button>
+                              )}
 
                               {canAdminTransfer && (
                                 <button
@@ -1433,6 +1522,7 @@ export function FormTrackerView({
               Boolean(form.isSigned) ||
               Boolean(form.isTeacherSigned);
 
+            const isTransferredToMinistryRep = form.workflowStage === 'transferred_to_ministry_rep';
             const step2Done =
               form.workflowStage === 'admin_transferred_to_principal' ||
               form.workflowStage === 'principal_signed_transferred_to_teacher' ||
@@ -1440,7 +1530,8 @@ export function FormTrackerView({
               Boolean(form.adminReviewedBy) ||
               Boolean(form.adminReviewedAt) ||
               Boolean(form.isSigned) ||
-              Boolean(form.isTeacherSigned);
+              Boolean(form.isTeacherSigned) ||
+              isTransferredToMinistryRep;
 
             const step3Done =
               form.workflowStage === 'principal_signed_transferred_to_teacher' ||
@@ -1454,8 +1545,9 @@ export function FormTrackerView({
               Boolean(form.isTeacherSigned);
 
             // Role-based quick action eligibility
-            const canAdminTransfer =
-              userProfile?.role === 'admin' && !step2Done;
+            const isRequiresMinistryRep = requiresMinistryRepTransfer(form);
+            const canAdminTransfer = userProfile?.role === 'admin' && !step2Done;
+            const canAdminTransferMinistryRep = userProfile?.role === 'admin' && isRequiresMinistryRep && !isTransferredToMinistryRep && !form.isMinistryRepSigned;
             const canPrincipalSign =
               userProfile?.role === 'school' &&
               userProfile?.roleType === 'administrative' &&
@@ -1546,6 +1638,30 @@ export function FormTrackerView({
                         {computed.progressPercent}%
                       </span>
                     </div>
+
+                    {isTransferredToMinistryRep && (
+                      <span className="px-3.5 py-1.5 rounded-xl text-xs font-black bg-purple-50 text-purple-900 border border-purple-300 flex items-center gap-1.5 shadow-2xs">
+                        <Building2 className="w-3.5 h-3.5 text-purple-700 animate-pulse" />
+                        <span>{language === 'ar' ? 'محولة لممثل الوزارة' : 'Transferred to Ministry Rep'}</span>
+                      </span>
+                    )}
+
+                    {canAdminTransferMinistryRep && (
+                      <button
+                        type="button"
+                        disabled={processingFormId === form.id}
+                        onClick={() => handleQuickMinistryRepTransfer(form)}
+                        className="px-4 py-2 bg-purple-800 hover:bg-purple-900 disabled:opacity-50 text-white font-black text-xs rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                        title={language === 'ar' ? 'تحويل لممثل الوزارة لأنها استمارة فحص نهائي غير مطابقة' : 'Escalate to Ministry Rep (Non-conforming final audit)'}
+                      >
+                        <Building2 className="w-3.5 h-3.5 text-amber-300" />
+                        <span>
+                          {processingFormId === form.id
+                            ? (language === 'ar' ? 'جاري التحويل للوزارة...' : 'Transferring...')
+                            : (language === 'ar' ? 'تحويل إلى ممثل الوزارة (غير مطابقة)' : 'Transfer to Ministry Rep')}
+                        </span>
+                      </button>
+                    )}
 
                     {/* Direct Role Action Buttons */}
                     {canAdminTransfer && (

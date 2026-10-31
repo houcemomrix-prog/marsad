@@ -21,10 +21,11 @@ import {
   FileCheck,
   ShieldCheck,
   Download,
-  ArrowRight
+  ArrowRight,
+  Building2
 } from 'lucide-react';
 import { ArchivedForm, StudentMark, ObservationDetail, UserProfile, FormDesignSettings } from '../types';
-import { getFormDesignSettings, transferArchivedFormToPrincipal } from '../services/db';
+import { getFormDesignSettings, transferArchivedFormToPrincipal, signArchivedTeamLeaderForm } from '../services/db';
 import { executePdfDownload, printElementInIframe } from '../utils/pdfDownload';
 import { formatSafeDate } from '../utils/dateUtils';
 import { PdfDownloadModal } from './PdfDownloadModal';
@@ -43,7 +44,9 @@ interface SchoolArchiveViewProps {
     conformanceStatus?: 'conforming' | 'non-conforming', 
     hasGradeRevisions?: boolean
   ) => Promise<void>;
+  onSignTeamLeaderForm?: (archiveId: string, teamLeaderName: string, qrData: string) => Promise<void>;
   onTransferToPrincipal?: (archiveId: string, adminName: string) => Promise<void>;
+  onTransferToMinistryRep?: (archiveId: string, adminName: string) => Promise<void>;
   userProfile?: UserProfile | null;
   onSuccess: (msg: string) => void;
   certifiedOnly?: boolean;
@@ -57,7 +60,9 @@ export function SchoolArchiveView({
   onSignForm,
   onSignTeacherForm,
   onSignExaminerForm,
+  onSignTeamLeaderForm,
   onTransferToPrincipal,
+  onTransferToMinistryRep,
   userProfile,
   onSuccess,
   certifiedOnly = false,
@@ -730,6 +735,101 @@ export function SchoolArchiveView({
     }
   };
 
+  const handleTransferToMinistryRep = async (form: ArchivedForm) => {
+    if (!isUserAdmin) return;
+    setIsSigningInProcess(true);
+    try {
+      const adminName = userProfile?.name || 'مدير النظام';
+      if (onTransferToMinistryRep) {
+        await onTransferToMinistryRep(form.id, adminName);
+      }
+      if (selectedForm && selectedForm.id === form.id) {
+        setSelectedForm(prev => prev ? {
+          ...prev,
+          workflowStage: 'transferred_to_ministry_rep',
+          ministryRepTransferredAt: new Date().toISOString(),
+          ministryRepTransferredBy: adminName,
+          adminReviewedBy: adminName,
+          adminReviewedAt: new Date().toISOString()
+        } : null);
+      }
+      onSuccess(
+        language === 'ar'
+          ? '✓ تم تحويل استمارة الفحص النهائي غير المطابقة إلى ممثل الوزارة بنجاح!'
+          : 'Non-conforming final audit form escalated to Ministry Representative successfully!'
+      );
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsSigningInProcess(false);
+    }
+  };
+
+  const isNonConformingFinal = (form: ArchivedForm | null): boolean => {
+    if (!form) return false;
+    const isFinal =
+      form.assessmentType === 'test' ||
+      form.type === 'test' ||
+      form.assessmentTitle?.includes('نهائي') ||
+      form.title?.includes('نهائي') ||
+      form.grade === 'الصف الثاني عشر' ||
+      form.grade === 'Grade 12';
+
+    const isNonConforming =
+      form.conformanceStatus === 'non-conforming' ||
+      form.hasGradeRevisions === true ||
+      (form.students && form.students.some(s => 
+        (s.notes && ['1', '2', '3', '4', '5', '6'].includes(s.notes.trim())) ||
+        (s.notes && s.notes !== 'لا يوجد' && s.notes !== 'مطابق للشروط فنيًا' && s.notes.trim() !== '')
+      ));
+
+    return Boolean(isFinal && isNonConforming);
+  };
+
+  const handleSignAsTeamLeader = async (form: ArchivedForm) => {
+    if (!isUserAdmin) return;
+    setIsSigningInProcess(true);
+    try {
+      const adminName = userProfile?.name || 'أ. حسام عمري (رئيس الفريق / مدير النظام)';
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+      let block1 = '';
+      let block2 = '';
+      for (let i = 0; i < 4; i++) {
+        block1 += chars.charAt(Math.floor(Math.random() * chars.length));
+        block2 += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      const token = `OM-TL-${block1}-${block2}`;
+
+      if (onSignTeamLeaderForm) {
+        await onSignTeamLeaderForm(form.id, adminName, token);
+      } else {
+        await signArchivedTeamLeaderForm(form.id, adminName, token);
+      }
+
+      if (selectedForm && selectedForm.id === form.id) {
+        setSelectedForm(prev => prev ? {
+          ...prev,
+          isTeamLeaderSigned: true,
+          teamLeaderSignedAt: new Date().toISOString(),
+          teamLeaderSignedName: adminName,
+          teamLeaderSignatureQrData: token,
+          adminReviewedBy: adminName,
+          adminReviewedAt: new Date().toISOString()
+        } : null);
+      }
+
+      onSuccess(
+        language === 'ar'
+          ? '✓ تم توقيع واعتماد رئيس الفريق (مدير النظام) على استمارة الفحص النهائي غير المطابقة بنجاح!'
+          : 'Form signed as Team Leader (System Admin) successfully!'
+      );
+    } catch (err: any) {
+      console.error(err);
+    } finally {
+      setIsSigningInProcess(false);
+    }
+  };
+
   const handleStartSignature = async (form: ArchivedForm, type: 'principal' | 'teacher' | 'examiner' = 'principal') => {
     if (type === 'principal' && !isUserPrincipal) {
       return;
@@ -1365,7 +1465,14 @@ export function SchoolArchiveView({
                         setExaminerGradeRevisions(false);
                         setShowExaminerChoiceModal(true);
                       } else if (isUserAdmin) {
-                        handleTransferToPrincipal(selectedForm);
+                        const isFinal = selectedForm.assessmentType === 'test' || selectedForm.grade === 'Grade 12' || selectedForm.grade === 'الصف الثاني عشر' || (selectedForm.assessmentTitle && selectedForm.assessmentTitle.includes('نهائي'));
+                        const isNonConforming = selectedForm.conformanceStatus === 'non-conforming' || selectedForm.hasGradeRevisions || (selectedForm.students && selectedForm.students.some(s => Boolean(s.notes && ['1', '2', '3', '4', '5', '6'].includes(s.notes.trim()))));
+                        const isFullySigned = (selectedForm.isTeacherSigned && selectedForm.isSigned) || selectedForm.workflowStage === 'completed';
+                        if (isFinal && isNonConforming && isFullySigned) {
+                          handleTransferToMinistryRep(selectedForm);
+                        } else {
+                          handleTransferToPrincipal(selectedForm);
+                        }
                       } else if (isUserPrincipal) {
                         handleStartSignature(selectedForm, 'principal');
                       } else if (isUserTeacher) {
@@ -1378,9 +1485,18 @@ export function SchoolArchiveView({
                           ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
                           : 'bg-violet-600 hover:bg-violet-700 text-white'
                         : isUserAdmin
-                        ? selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
-                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                          : 'bg-indigo-600 hover:bg-indigo-700 text-white'
+                        ? (() => {
+                            const isFinal = selectedForm.assessmentType === 'test' || selectedForm.grade === 'Grade 12' || selectedForm.grade === 'الصف الثاني عشر' || (selectedForm.assessmentTitle && selectedForm.assessmentTitle.includes('نهائي'));
+                            const isNonConforming = selectedForm.conformanceStatus === 'non-conforming' || selectedForm.hasGradeRevisions || (selectedForm.students && selectedForm.students.some(s => Boolean(s.notes && ['1', '2', '3', '4', '5', '6'].includes(s.notes.trim()))));
+                            const isFullySigned = (selectedForm.isTeacherSigned && selectedForm.isSigned) || selectedForm.workflowStage === 'completed';
+                            return isFinal && isNonConforming && isFullySigned;
+                          })()
+                          ? selectedForm.workflowStage === 'transferred_to_ministry_rep' || selectedForm.isMinistryRepSigned
+                            ? 'bg-purple-700 hover:bg-purple-800 text-white'
+                            : 'bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white ring-2 ring-purple-300 shadow-purple-500/20'
+                          : selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                            ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                            : 'bg-indigo-600 hover:bg-indigo-700 text-white'
                         : isUserPrincipal
                         ? selectedForm.isSigned
                           ? 'bg-emerald-700 hover:bg-emerald-800 text-white'
@@ -1400,14 +1516,35 @@ export function SchoolArchiveView({
                         </span>
                       </>
                     ) : isUserAdmin ? (
-                      <>
-                        <ArrowRight className="w-4 h-4" />
-                        <span>
-                          {selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
-                            ? (language === 'ar' ? '✓ تم التحويل لمدير المدرسة' : '✓ Transferred to Principal')
-                            : (language === 'ar' ? 'تحويل لمدير المدرسة' : 'Transfer to Principal')}
-                        </span>
-                      </>
+                      (() => {
+                        const isFinal = selectedForm.assessmentType === 'test' || selectedForm.grade === 'Grade 12' || selectedForm.grade === 'الصف الثاني عشر' || (selectedForm.assessmentTitle && selectedForm.assessmentTitle.includes('نهائي'));
+                        const isNonConforming = selectedForm.conformanceStatus === 'non-conforming' || selectedForm.hasGradeRevisions || (selectedForm.students && selectedForm.students.some(s => Boolean(s.notes && ['1', '2', '3', '4', '5', '6'].includes(s.notes.trim()))));
+                        const isFullySigned = (selectedForm.isTeacherSigned && selectedForm.isSigned) || selectedForm.workflowStage === 'completed';
+                        const reqMin = isFinal && isNonConforming && isFullySigned;
+                        if (reqMin) {
+                          const isTransferred = selectedForm.workflowStage === 'transferred_to_ministry_rep' || selectedForm.isMinistryRepSigned;
+                          return (
+                            <>
+                              <Building2 className="w-4 h-4" />
+                              <span>
+                                {isTransferred
+                                  ? (language === 'ar' ? '✓ تم التحويل لممثل الوزارة' : '✓ Escalated to Ministry Rep')
+                                  : (language === 'ar' ? 'تحويل إلى ممثل الوزارة (مستوفية التواقيع)' : 'Transfer to Ministry Rep (Fully Signed)')}
+                              </span>
+                            </>
+                          );
+                        }
+                        return (
+                          <>
+                            <ArrowRight className="w-4 h-4" />
+                            <span>
+                              {selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                                ? (language === 'ar' ? '✓ تم التحويل لمدير المدرسة' : '✓ Transferred to Principal')
+                                : (language === 'ar' ? 'تحويل لمدير المدرسة' : 'Transfer to Principal')}
+                            </span>
+                          </>
+                        );
+                      })()
                     ) : isUserPrincipal ? (
                       <>
                         <PenTool className="w-4 h-4" />
@@ -1568,54 +1705,76 @@ export function SchoolArchiveView({
                     </div>
                   </div>
 
-                  {/* Step 2: System Admin - Clickable Button ONLY for System Admin */}
+                  {/* Step 2: System Admin / Team Leader */}
                   <div
                     role={isUserAdmin ? 'button' : undefined}
                     tabIndex={isUserAdmin ? 0 : undefined}
-                    onClick={isUserAdmin ? () => handleTransferToPrincipal(selectedForm) : undefined}
+                    onClick={
+                      isUserAdmin
+                        ? () => {
+                            if (isNonConformingFinal(selectedForm) && !selectedForm.isTeamLeaderSigned) {
+                              handleSignAsTeamLeader(selectedForm);
+                            } else {
+                              handleTransferToPrincipal(selectedForm);
+                            }
+                          }
+                        : undefined
+                    }
                     className={`p-3 rounded-xl border transition-all flex items-center gap-2.5 shadow-xs ${
                       isUserAdmin
                         ? 'cursor-pointer hover:scale-[1.02] active:scale-95'
                         : 'cursor-not-allowed opacity-70 select-none'
                     } ${
-                      selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                      (isNonConformingFinal(selectedForm) ? selectedForm.isTeamLeaderSigned : selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned)
                         ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
                         : isUserAdmin
-                        ? 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700 ring-2 ring-indigo-500/30'
+                        ? isNonConformingFinal(selectedForm) 
+                          ? 'bg-purple-700 hover:bg-purple-800 text-white border-purple-800 ring-2 ring-purple-500/30'
+                          : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700 ring-2 ring-indigo-500/30'
                         : 'bg-slate-100 border-slate-200 text-slate-500'
                     }`}
                   >
                     <div className={`w-6 h-6 rounded-lg flex items-center justify-center font-black text-xs shrink-0 ${
-                      selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                      (isNonConformingFinal(selectedForm) ? selectedForm.isTeamLeaderSigned : selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned)
                         ? 'bg-emerald-600 text-white' 
                         : isUserAdmin
                         ? 'bg-white/20 text-white animate-pulse'
                         : 'bg-slate-300 text-slate-600'
                     }`}>
-                      {selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned ? '✓' : '2'}
+                      {(isNonConformingFinal(selectedForm) ? selectedForm.isTeamLeaderSigned : selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned) ? '✓' : '2'}
                     </div>
                     <div className="min-w-0 text-right">
                       <h5 className={`font-bold text-[10.5px] leading-tight ${
-                        selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                        (isNonConformingFinal(selectedForm) ? selectedForm.isTeamLeaderSigned : selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned)
                           ? 'text-slate-800'
                           : isUserAdmin
                           ? 'text-white'
                           : 'text-slate-800'
                       }`}>
-                        {language === 'ar' ? '2. تحويل لمدير المدرسة' : '2. Transfer to Principal'}
+                        {isNonConformingFinal(selectedForm)
+                          ? (selectedForm.isTeamLeaderSigned 
+                              ? (language === 'ar' ? '2. توقيع رئيس الفريق (معتمد ✓)' : '2. Team Leader Signed ✓')
+                              : (language === 'ar' ? '2. توقيع رئيس الفريق (مدير النظام)' : '2. Sign as Team Leader'))
+                          : (language === 'ar' ? '2. تحويل لمدير المدرسة' : '2. Transfer to Principal')}
                       </h5>
                       <span className={`text-[9px] font-sans block truncate mt-0.5 ${
-                        selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned
+                        (isNonConformingFinal(selectedForm) ? selectedForm.isTeamLeaderSigned : selectedForm.workflowStage === 'admin_transferred_to_principal' || selectedForm.isSigned || selectedForm.isTeacherSigned)
                           ? 'text-slate-500'
                           : isUserAdmin
-                          ? 'text-indigo-100'
+                          ? isNonConformingFinal(selectedForm) ? 'text-purple-100' : 'text-indigo-100'
                           : 'text-slate-500'
                       }`}>
-                        {selectedForm.adminReviewedBy 
-                          ? `${language === 'ar' ? 'تم التحويل:' : 'By:'} ${selectedForm.adminReviewedBy}` 
-                          : isUserAdmin
-                            ? (language === 'ar' ? 'اضغط لتحويلها لمدير المدرسة' : 'Click to transfer to Principal')
-                            : (language === 'ar' ? 'خاص بمدير النظام فقط' : 'System Admin only')}
+                        {isNonConformingFinal(selectedForm)
+                          ? (selectedForm.teamLeaderSignedName || selectedForm.adminReviewedBy 
+                              ? `${language === 'ar' ? 'الموقع:' : 'By:'} ${selectedForm.teamLeaderSignedName || selectedForm.adminReviewedBy}`
+                              : isUserAdmin 
+                                ? (language === 'ar' ? 'اضغط لتوقيع رئيس الفريق' : 'Click to sign as Team Leader')
+                                : (language === 'ar' ? 'خاص بمدير النظام (رئيس الفريق)' : 'Team Leader only'))
+                          : (selectedForm.adminReviewedBy 
+                              ? `${language === 'ar' ? 'تم التحويل:' : 'By:'} ${selectedForm.adminReviewedBy}` 
+                              : isUserAdmin
+                                ? (language === 'ar' ? 'اضغط لتحويلها لمدير المدرسة' : 'Click to transfer to Principal')
+                                : (language === 'ar' ? 'خاص بمدير النظام فقط' : 'System Admin only'))}
                       </span>
                     </div>
                   </div>
@@ -2082,7 +2241,18 @@ export function SchoolArchiveView({
                     <div className="flex w-full text-[16px]" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%' }}>
                       
                       {/* Professional development space */}
-                      <div className="p-3 text-right flex flex-col justify-center" style={{ width: selectedForm.grade === 'Grade 12' ? '45%' : '33%', flex: selectedForm.grade === 'Grade 12' ? '0 0 45%' : '0 0 33%', boxSizing: 'border-box' }}>
+                      <div 
+                        className="p-3 text-right flex flex-col justify-center" 
+                        style={{ 
+                          width: isNonConformingFinal(selectedForm)
+                            ? ((!formStyles || formStyles.showTeacherSignature !== false) ? '25%' : '34%')
+                            : (selectedForm.grade === 'Grade 12' ? '45%' : '33%'), 
+                          flex: isNonConformingFinal(selectedForm)
+                            ? ((!formStyles || formStyles.showTeacherSignature !== false) ? '0 0 25%' : '0 0 34%')
+                            : (selectedForm.grade === 'Grade 12' ? '0 0 45%' : '0 0 33%'), 
+                          boxSizing: 'border-box' 
+                        }}
+                      >
                         <span className="font-extrabold text-[#821315] block text-[15px]">
                           {formStyles ? (formStyles.sectionDevelopmentAr || 'برامج الإنماء والتمكين المهني المقترحة بالتقرير:') : 'برامج الإنماء والتمكين المهني المقترحة بالتقرير:'}
                         </span>
@@ -2091,7 +2261,14 @@ export function SchoolArchiveView({
 
                       {/* Teacher Signature Block (for continuous assessment only) - respects showTeacherSignature toggle */}
                       {((!formStyles || formStyles.showTeacherSignature !== false) || selectedForm.grade === 'Grade 12') && (
-                        <div className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center" style={{ width: '21%', flex: '0 0 21%', boxSizing: 'border-box' }}>
+                        <div 
+                          className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center" 
+                          style={{ 
+                            width: isNonConformingFinal(selectedForm) ? '18%' : '21%', 
+                            flex: isNonConformingFinal(selectedForm) ? '0 0 18%' : '0 0 21%', 
+                            boxSizing: 'border-box' 
+                          }}
+                        >
                           <span className="font-extrabold text-[#821315] block text-[15px]">
                             {formStyles ? (formStyles.sectionTeacherSignAr || 'معلم المادة الموقع:') : 'معلم المادة الموقع:'}
                           </span>
@@ -2115,7 +2292,14 @@ export function SchoolArchiveView({
                       )}
 
                       {/* Examiner details */}
-                      <div className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center" style={{ width: '21%', flex: '0 0 21%', boxSizing: 'border-box' }}>
+                      <div 
+                        className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center" 
+                        style={{ 
+                          width: isNonConformingFinal(selectedForm) ? '18%' : '21%', 
+                          flex: isNonConformingFinal(selectedForm) ? '0 0 18%' : '0 0 21%', 
+                          boxSizing: 'border-box' 
+                        }}
+                      >
                         <span className="font-extrabold text-[#821315] block text-[15px]">
                           {formStyles ? (formStyles.sectionAuditorSignAr || 'مشرف فحص ومطابقة المادة:') : 'مشرف فحص ومطابقة المادة:'}
                         </span>
@@ -2137,8 +2321,63 @@ export function SchoolArchiveView({
                         </div>
                       </div>
 
+                      {/* Team Leader Signature Block - ONLY for Non-Conforming Final Audit forms (الذي يقوم به مدير النظام) */}
+                      {isNonConformingFinal(selectedForm) && (
+                        <div 
+                          className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center bg-purple-50/20" 
+                          style={{ width: '18%', flex: '0 0 18%', boxSizing: 'border-box' }}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-extrabold text-[#821315] block text-[15px]">
+                              {formStyles ? (formStyles.sectionTeamLeaderSignAr || 'رئيس الفريق:') : 'رئيس الفريق:'}
+                            </span>
+                            <span className="text-[9px] font-bold text-purple-800 bg-purple-100/90 px-1 py-0.5 rounded">
+                              مدير النظام
+                            </span>
+                          </div>
+                          <p className="text-slate-800 font-black text-[15px] mt-1 leading-tight">
+                            {selectedForm.isTeamLeaderSigned 
+                              ? (selectedForm.teamLeaderSignedName || selectedForm.adminReviewedBy || 'أ. حسام عمري (رئيس الفريق)').replace(/[)(]/g, ' ')
+                              : (selectedForm.adminReviewedBy || 'أ. حسام عمري (رئيس الفريق)').replace(/[)(]/g, ' ')}
+                          </p>
+                          <div className="text-[13px] text-slate-400 mt-2 block w-full font-mono">
+                            {selectedForm.isTeamLeaderSigned || selectedForm.adminReviewedBy ? (
+                              <div className="block w-full">
+                                <span className="font-mono text-purple-700 font-extrabold block w-full text-[12px]" style={{ direction: 'ltr' }}>
+                                  {selectedForm.teamLeaderSignatureQrData || 'OM-TL-VERIFIED'}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-purple-600 font-bold block text-[11px]">⏱️ بانتظار توقيع رئيس الفريق</span>
+                                {isUserAdmin && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSignAsTeamLeader(selectedForm)}
+                                    className="px-2 py-0.5 bg-[#821315] hover:bg-[#a61c1e] text-white rounded text-[10px] font-black cursor-pointer shadow-xs active:scale-95"
+                                  >
+                                    توقيع
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Principal and Stamp */}
-                      <div className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center relative" style={{ width: selectedForm.grade === 'Grade 12' ? '36%' : '28%', flex: selectedForm.grade === 'Grade 12' ? '0 0 36%' : '0 0 28%', boxSizing: 'border-box' }}>
+                      <div 
+                        className="p-3 border-r border-[#821315]/80 text-right flex flex-col justify-center relative" 
+                        style={{ 
+                          width: isNonConformingFinal(selectedForm)
+                            ? ((!formStyles || formStyles.showTeacherSignature !== false) ? '21%' : '27%')
+                            : (selectedForm.grade === 'Grade 12' ? '36%' : '28%'), 
+                          flex: isNonConformingFinal(selectedForm)
+                            ? ((!formStyles || formStyles.showTeacherSignature !== false) ? '0 0 21%' : '0 0 27%')
+                            : (selectedForm.grade === 'Grade 12' ? '0 0 36%' : '0 0 28%'), 
+                          boxSizing: 'border-box' 
+                        }}
+                      >
                         {selectedForm.isSigned && selectedForm.signatureStampUrl !== 'no_stamp' && (
                           <DraggableStamp 
                             src={getActiveStamp(selectedForm.schoolId || selectedForm.schoolName)} 
@@ -2172,6 +2411,38 @@ export function SchoolArchiveView({
 
                     </div>
                   </div>
+
+                  {/* Ministerial Representative Endorsement Section (For Non-Conforming Final Audit forms) */}
+                  {selectedForm.isMinistryRepSigned ? (
+                    <div className="mt-3 p-3.5 border-2 border-purple-800 rounded bg-purple-50/70 text-right flex flex-col md:flex-row items-center justify-between gap-3 text-[14px]">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-lg bg-purple-900 text-white flex items-center justify-center font-black">
+                          <Building2 className="w-5 h-5 text-amber-300" />
+                        </div>
+                        <div>
+                          <div className="font-black text-purple-950 text-[15px]">
+                            {language === 'ar' ? 'مصادقة واعتماد ممثل وزارة التربية والتعليم (الفحص النهائي غير المطابق)' : 'Ministry of Education Representative Endorsement'}
+                          </div>
+                          <div className="text-purple-900 font-bold text-xs mt-0.5">
+                            المعتمد: {selectedForm.ministryRepName || 'د. راشد بن سيف المقبالي'} | التوجيه الوزاري: {selectedForm.ministryRepDirective || 'تمت المراجعة والاعتماد'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-left font-mono text-[12px] text-purple-900 bg-white px-3 py-1.5 rounded border border-purple-300 font-bold" dir="ltr">
+                        {selectedForm.ministryRepSignatureQrData || 'OM-MOE-MIN-REP-VERIFIED'}
+                      </div>
+                    </div>
+                  ) : selectedForm.workflowStage === 'transferred_to_ministry_rep' ? (
+                    <div className="mt-3 p-3 border border-dashed border-purple-400 bg-purple-50/50 rounded text-right flex items-center justify-between text-xs font-bold text-purple-900">
+                      <div className="flex items-center gap-2">
+                        <Building2 className="w-4 h-4 text-purple-700" />
+                        <span>{language === 'ar' ? 'تم تحويل هذه الاستمارة (الفحص النهائي غير المطابق) إلى ممثل وزارة التربية والتعليم وبانتظار التوجيه والمصادقة الوزارية' : 'Escalated to Ministry Representative for review & ministerial directive'}</span>
+                      </div>
+                      <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-[11px] font-mono">
+                        قيد المراجعة الوزارية
+                      </span>
+                    </div>
+                  ) : null}
 
                 </div>
                   </div>

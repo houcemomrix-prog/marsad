@@ -150,6 +150,15 @@ const INITIAL_SANDBOX_USERS: Record<string, UserProfile> = {
     jobTitle: 'مدير النظام',
     subject: 'English Language',
     createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30).toISOString()
+  },
+  'demo-ministry-1': {
+    uid: 'demo-ministry-1',
+    name: 'د. راشد المقبالي (ممثل وزارة التربية والتعليم)',
+    email: 'ministry@moe.om',
+    role: 'ministry_rep',
+    jobTitle: 'ممثل الوزارة',
+    directorate: 'ديوان عام وزارة التربية والتعليم',
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 15).toISOString()
   }
 };
 
@@ -936,6 +945,166 @@ const SANDBOX_ARCHIVED_FORMS_KEY = 'oman_moe_sandbox_archived_forms';
 
 const INITIAL_SANDBOX_ARCHIVED_FORMS: ArchivedForm[] = [
   {
+    id: 'archive_demo_final_nonconforming',
+    assessmentId: 'asmt_phys_g12_final',
+    assessmentTitle: 'استمارة الفحص والتدقيق النهائي - امتحان نهاية الفصل (الفيزياء)',
+    assessmentType: 'test',
+    type: 'test',
+    grade: 'الصف الثاني عشر',
+    subject: 'الفيزياء',
+    schoolName: 'مدرسة الدقم للتعليم الأساسي',
+    schoolId: 'demo-school-1',
+    teacherName: 'د. فاطمة السيابية (معلمة العلوم بمدرسة الدقم)',
+    teacherFileNo: '96894567890',
+    appointmentYear: '2017',
+    directorate: 'المديرية العامة للتربية والتعليم بمحافظة الوسطى',
+    visitDate: new Date().toISOString().split('T')[0],
+    subjectName: 'الفيزياء',
+    academicYear: '2025/2026',
+    semester: 'الفصل الدراسي الثاني',
+    suggestedDevelopment: 'مراجعة معايير ونماذج تصحيح الأسئلة المقالية وإعادة تدقيق كشوف درجات الطلاب.',
+    examinerName: 'أ. سالم الحارثي',
+    principalName: 'أ. وليد الخروصي (مدير مدرسة الدقم)',
+    students: [
+      { name: 'سالم بن أحمد الجنيبي', level: 'امتحان نهائي', mark: '8', notes: '1' },
+      { name: 'منى بنت عبدالله الوهيبية', level: 'امتحان نهائي', mark: '7', notes: '2' },
+      { name: 'سليمان بن علي الجنيبي', level: 'امتحان نهائي', mark: '6', notes: '1' },
+      { name: 'فاطمة بنت حميد المهرية', level: 'امتحان نهائي', mark: '9', notes: 'لا يوجد' },
+      { name: 'أحمد بن سعيد الوهيبي', level: 'امتحان نهائي', mark: '5', notes: '3' },
+      { name: 'مريم بنت حمد الجنيبية', level: 'امتحان نهائي', mark: '7', notes: '2' }
+    ],
+    observations: [
+      { element: 'عدم تطابق عينة من درجات الامتحان النهائي', gradeClass: '12/1', tool: 'امتحان نهائي', status: 'غير مطابق للشروط', notes: 'تم رصد فروقات في درجات الأسئلة المقالية للطلبة بين الدفتر وكشف الرصد (سبب التعديل: 1 و 2)' },
+      { element: 'معايير إسناد الدرجات', gradeClass: '12/1', tool: 'امتحان نهائي', status: 'غير مطابق للشروط', notes: 'يوجد عدم التزام بدليل التصحيح الوزاري المعتمد في السؤال الثالث' }
+    ],
+    isExaminerSigned: true,
+    examinerSignedAt: new Date().toISOString(),
+    examinerSignedName: 'أ. سالم الحارثي',
+    examinerSignatureQrData: 'OM-EXM-FINAL-DISC-99',
+    examinerSignatureStampUrl: 'Examiner verified electronically',
+    conformanceStatus: 'non-conforming',
+    hasGradeRevisions: true,
+    workflowStage: 'examiner_submitted_to_admin',
+    isTeacherSigned: false,
+    isSigned: false,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  },
+  {
+    id: 'archive_demo_final_nonconforming_completed',
+    assessmentId: 'asmt_math_g12_final_complete',
+    assessmentTitle: 'استمارة الفحص والتدقيق النهائي - امتحان الرياضيات البحتة (الصف 12)',
+    assessmentType: 'test',
+    type: 'test',
+    grade: 'الصف الثاني عشر',
+    subject: 'الرياضيات',
+    schoolName: 'مدرسة الدقم للتعليم الأساسي',
+    schoolId: 'demo-school-1',
+    teacherName: 'د. فاطمة السيابية (معلمة العلوم بمدرسة الدقم)',
+    teacherFileNo: '96894567890',
+    appointmentYear: '2017',
+    directorate: 'المديرية العامة للتربية والتعليم بمحافظة الوسطى',
+    visitDate: new Date().toISOString().split('T')[0],
+    subjectName: 'الرياضيات',
+    academicYear: '2025/2026',
+    semester: 'الفصل الدراسي الثاني',
+    suggestedDevelopment: 'تدقيق كشوف رصد الدرجات وإعادة صياغة الملاحظات الفنية بالتنسيق مع إدارة المدرسة.',
+    examinerName: 'أ. سالم الحارثي',
+    principalName: 'أ. وليد الخروصي (مدير مدرسة الدقم)',
+    students: [
+      { name: 'سالم بن أحمد الجنيبي', level: 'امتحان نهائي', mark: '8', notes: '1' },
+      { name: 'منى بنت عبدالله الوهيبية', level: 'امتحان نهائي', mark: '7', notes: '2' },
+      { name: 'سليمان بن علي الجنيبي', level: 'امتحان نهائي', mark: '6', notes: '1' },
+      { name: 'فاطمة بنت حميد المهرية', level: 'امتحان نهائي', mark: '9', notes: 'لا يوجد' },
+      { name: 'أحمد بن سعيد الوهيبي', level: 'امتحان نهائي', mark: '5', notes: '3' },
+      { name: 'مريم بنت حمد الجنيبية', level: 'امتحان نهائي', mark: '7', notes: '2' }
+    ],
+    observations: [
+      { element: 'فحص مطابقة ورقة الإجابة للدرجات النهائية', gradeClass: '12/2', tool: 'امتحان نهائي', status: 'غير مطابق للشروط', notes: 'وجود تعديل في درجات الأسئلة المقالية رقم (1) و (2) يتطلب الاعتماد الوزاري' }
+    ],
+    isExaminerSigned: true,
+    examinerSignedAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+    examinerSignedName: 'أ. سالم الحارثي',
+    examinerSignatureQrData: 'OM-EXM-FINAL-MATH-88',
+    examinerSignatureStampUrl: 'Examiner verified electronically',
+    isSigned: true,
+    signedAt: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
+    signedByPrincipalName: 'أ. وليد الخروصي (مدير مدرسة الدقم)',
+    signatureStampUrl: 'official_moe_stamp',
+    signatureQrData: 'OM-DIR-DUQM-9090',
+    isTeacherSigned: true,
+    teacherSignedAt: new Date(Date.now() - 1000 * 60 * 60 * 1).toISOString(),
+    teacherSignedName: 'د. فاطمة السيابية (معلمة العلوم بمدرسة الدقم)',
+    teacherSignatureQrData: 'OM-TCH-DUQM-1010',
+    teacherSignatureStampUrl: 'Teacher verified electronically',
+    isTeamLeaderSigned: true,
+    teamLeaderSignedAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+    teamLeaderSignedName: 'أ. حسام عمري (رئيس الفريق / مدير النظام)',
+    teamLeaderSignatureQrData: 'OM-TL-DUQM-7711',
+    conformanceStatus: 'non-conforming',
+    hasGradeRevisions: true,
+    workflowStage: 'completed',
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 6).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 1).toISOString()
+  },
+  {
+    id: 'archive_demo_final_nonconforming_heima',
+    assessmentId: 'asmt_chem_g12_final_heima',
+    assessmentTitle: 'استمارة الفحص والتدقيق النهائي - امتحان الكيمياء (الصف 12)',
+    assessmentType: 'test',
+    type: 'test',
+    grade: 'الصف الثاني عشر',
+    subject: 'الكيمياء',
+    schoolName: 'مدرسة هيماء للتعليم الأساسي',
+    schoolId: 'school_heima',
+    teacherName: 'أ. راشد بن سالم الحرسوسي',
+    teacherFileNo: '96895678901',
+    appointmentYear: '2016',
+    directorate: 'المديرية العامة للتربية والتعليم بمحافظة الوسطى',
+    visitDate: new Date().toISOString().split('T')[0],
+    subjectName: 'الكيمياء',
+    academicYear: '2025/2026',
+    semester: 'الفصل الدراسي الثاني',
+    suggestedDevelopment: 'مراعاة دقة تصحيح المسائل الكيميائية وتطابق درجات كشوف الرصد مع دفاتر الاختبار.',
+    examinerName: 'أ. ناصر بن خميس اليعربي',
+    principalName: 'أ. سالم بن حمد الجنيبي',
+    students: [
+      { name: 'محمد بن سالم الحرسوسي', level: 'امتحان نهائي', mark: '7', notes: '1' },
+      { name: 'علي بن راشد الحكيم', level: 'امتحان نهائي', mark: '6.5', notes: '2' },
+      { name: 'مبارك بن سعيد المهرى', level: 'امتحان نهائي', mark: '8', notes: '4' },
+      { name: 'حميد بن ناصر البطحري', level: 'امتحان نهائي', mark: '9', notes: 'لا يوجد' },
+      { name: 'سلطان بن بدر الجنيبي', level: 'امتحان نهائي', mark: '6', notes: '2' }
+    ],
+    observations: [
+      { element: 'مطابقة درجات الامتحان النهائي الكيمياء', gradeClass: '12/1', tool: 'امتحان نهائي', status: 'غير مطابق للشروط', notes: 'فروقات في درجات السؤال الثاني والسؤال الخامس بين الدفتر وكشف الدرجات (سبب التعديل: 1، 2، 4)' },
+      { element: 'التطبيق الدقيق لدليل التصحيح الوزاري', gradeClass: '12/1', tool: 'امتحان نهائي', status: 'غير مطابق للشروط', notes: 'تعديل درجات عينة من الطلاب بناءً على دليل التصحيح المعتمد' }
+    ],
+    isExaminerSigned: true,
+    examinerSignedAt: new Date(Date.now() - 1000 * 60 * 60 * 8).toISOString(),
+    examinerSignedName: 'أ. ناصر بن خميس اليعربي',
+    examinerSignatureQrData: 'OM-EXM-FINAL-CHEM-77',
+    examinerSignatureStampUrl: 'Examiner verified electronically',
+    isSigned: true,
+    signedAt: new Date(Date.now() - 1000 * 60 * 60 * 4).toISOString(),
+    signedByPrincipalName: 'أ. سالم بن حمد الجنيبي (مدير مدرسة هيماء)',
+    signatureStampUrl: 'official_moe_stamp',
+    signatureQrData: 'OM-DIR-HEIMA-8822',
+    isTeacherSigned: true,
+    teacherSignedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
+    teacherSignedName: 'أ. راشد بن سالم الحرسوسي',
+    teacherSignatureQrData: 'OM-TCH-HEIMA-3344',
+    teacherSignatureStampUrl: 'Teacher verified electronically',
+    isTeamLeaderSigned: true,
+    teamLeaderSignedAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+    teamLeaderSignedName: 'أ. حسام عمري (رئيس الفريق / مدير النظام)',
+    teamLeaderSignatureQrData: 'OM-TL-HEIMA-9922',
+    conformanceStatus: 'non-conforming',
+    hasGradeRevisions: true,
+    workflowStage: 'completed',
+    createdAt: new Date(Date.now() - 1000 * 60 * 60 * 9).toISOString(),
+    updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString()
+  },
+  {
     id: 'archive_demo_step2_pending_teacher',
     assessmentId: 'asmt_arab_g10_q1',
     assessmentTitle: 'استمارة الفحص والتدقيق المستمر - اختبار قصير 1 (اللغة العربية)',
@@ -1162,9 +1331,10 @@ function isSameSchoolLocal(school1?: string, school2?: string): boolean {
 
 function getWorkflowStageRank(form: ArchivedForm): number {
   const normalized = normalizeWorkflowStage(form);
-  if (normalized.workflowStage === 'completed' || (normalized.isSigned && normalized.isTeacherSigned)) return 4;
-  if (normalized.workflowStage === 'principal_signed_transferred_to_teacher' || normalized.isSigned) return 3;
-  if (normalized.workflowStage === 'admin_transferred_to_principal' || normalized.adminReviewedBy || normalized.adminReviewedAt) return 2;
+  if (normalized.workflowStage === 'completed' || (normalized.isSigned && normalized.isTeacherSigned)) return 5;
+  if (normalized.workflowStage === 'principal_signed_transferred_to_teacher' || normalized.isSigned) return 4;
+  if (normalized.workflowStage === 'admin_transferred_to_principal' || normalized.workflowStage === 'ministry_rep_reviewed' || normalized.adminReviewedBy || normalized.adminReviewedAt) return 3;
+  if (normalized.workflowStage === 'transferred_to_ministry_rep') return 2;
   if (normalized.workflowStage === 'examiner_submitted_to_admin' || normalized.isExaminerSigned) return 1;
   return 0;
 }
@@ -1175,6 +1345,8 @@ function normalizeWorkflowStage(form: ArchivedForm): ArchivedForm {
     stage = 'completed';
   } else if (form.isSigned) {
     stage = 'principal_signed_transferred_to_teacher';
+  } else if (stage === 'transferred_to_ministry_rep') {
+    stage = 'transferred_to_ministry_rep';
   } else if (stage === 'admin_transferred_to_principal' || form.adminReviewedBy || form.adminReviewedAt) {
     stage = 'admin_transferred_to_principal';
   } else if (!stage || stage === ('admin_transferred_to_teacher' as any)) {
@@ -1299,6 +1471,20 @@ function mapFirestoreDocToArchivedForm(docSnap: { id: string; data: () => any })
     workflowStage: data.workflowStage,
     adminReviewedAt: adminReviewedAtStr,
     adminReviewedBy: data.adminReviewedBy || null,
+    ministryRepTransferredAt: data.ministryRepTransferredAt,
+    ministryRepTransferredBy: data.ministryRepTransferredBy,
+    ministryRepReviewedAt: data.ministryRepReviewedAt,
+    ministryRepName: data.ministryRepName,
+    ministryRepDecision: data.ministryRepDecision,
+    ministryRepNotes: data.ministryRepNotes,
+    isMinistryRepSigned: data.isMinistryRepSigned || false,
+    ministryRepSignedAt: data.ministryRepSignedAt,
+    ministryRepSignatureQrData: data.ministryRepSignatureQrData,
+    ministryRepSignatureStampUrl: data.ministryRepSignatureStampUrl,
+    isTeamLeaderSigned: data.isTeamLeaderSigned || false,
+    teamLeaderSignedAt: data.teamLeaderSignedAt,
+    teamLeaderSignedName: data.teamLeaderSignedName,
+    teamLeaderSignatureQrData: data.teamLeaderSignatureQrData,
     createdAt: createdAtStr,
     updatedAt: updatedAtStr
   });
@@ -1570,6 +1756,51 @@ export async function signArchivedTeacherForm(
   }
 }
 
+export async function signArchivedTeamLeaderForm(
+  archiveId: string, 
+  teamLeaderName: string, 
+  signatureQrData?: string
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const token = signatureQrData || `OM-TL-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
+
+  if (idx !== -1) {
+    archives[idx] = {
+      ...archives[idx],
+      isTeamLeaderSigned: true,
+      teamLeaderSignedAt: nowIso,
+      teamLeaderSignedName: teamLeaderName,
+      teamLeaderSignatureQrData: token,
+      adminReviewedAt: nowIso,
+      adminReviewedBy: teamLeaderName,
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+  }
+
+  if (isSandboxActive()) return;
+
+  try {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
+      isTeamLeaderSigned: true,
+      teamLeaderSignedAt: nowIso,
+      teamLeaderSignedName: teamLeaderName,
+      teamLeaderSignatureQrData: token,
+      adminReviewedAt: nowIso,
+      adminReviewedBy: teamLeaderName,
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
+  } catch (error) {
+    console.warn("Firestore signArchivedTeamLeaderForm sync warning:", error);
+  }
+}
+
 export async function transferArchivedFormToPrincipal(
   archiveId: string, 
   adminName: string
@@ -1580,11 +1811,22 @@ export async function transferArchivedFormToPrincipal(
   let targetForm: Partial<ArchivedForm> = {};
 
   if (idx !== -1) {
+    const existing = archives[idx];
+    const isNonConforming = existing.conformanceStatus === 'non-conforming' || existing.hasGradeRevisions;
+    const tlQr = existing.teamLeaderSignatureQrData || `OM-TL-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
     archives[idx] = {
-      ...archives[idx],
+      ...existing,
       workflowStage: 'admin_transferred_to_principal',
       adminReviewedAt: nowIso,
       adminReviewedBy: adminName,
+      // If non-conforming, sign as Team Leader
+      ...(isNonConforming ? {
+        isTeamLeaderSigned: true,
+        teamLeaderSignedAt: existing.teamLeaderSignedAt || nowIso,
+        teamLeaderSignedName: existing.teamLeaderSignedName || adminName,
+        teamLeaderSignatureQrData: tlQr
+      } : {}),
       updatedAt: nowIso
     };
     targetForm = archives[idx];
@@ -1604,6 +1846,109 @@ export async function transferArchivedFormToPrincipal(
     notifyArchivedFormsSync();
   } catch (error) {
     console.warn("Firestore transferArchivedFormToPrincipal sync warning:", error);
+  }
+}
+
+export async function transferArchivedFormToMinistryRep(
+  archiveId: string, 
+  adminName: string,
+  notes?: string
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
+
+  if (idx !== -1) {
+    const existing = archives[idx];
+    const tlQr = existing.teamLeaderSignatureQrData || `OM-TL-${Math.random().toString(36).substring(2, 6).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+
+    archives[idx] = {
+      ...existing,
+      workflowStage: 'transferred_to_ministry_rep',
+      ministryRepTransferredAt: nowIso,
+      ministryRepTransferredBy: adminName,
+      adminReviewedAt: nowIso,
+      adminReviewedBy: adminName,
+      ministryRepNotes: notes || archives[idx].ministryRepNotes,
+      // Non-conforming final audit forms forwarded to ministry rep must have team leader signature
+      isTeamLeaderSigned: true,
+      teamLeaderSignedAt: existing.teamLeaderSignedAt || nowIso,
+      teamLeaderSignedName: existing.teamLeaderSignedName || adminName,
+      teamLeaderSignatureQrData: tlQr,
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+  }
+
+  if (isSandboxActive()) return;
+
+  try {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
+      workflowStage: 'transferred_to_ministry_rep',
+      ministryRepTransferredAt: nowIso,
+      ministryRepTransferredBy: adminName,
+      adminReviewedAt: nowIso,
+      adminReviewedBy: adminName,
+      ministryRepNotes: notes || null,
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
+  } catch (error) {
+    console.warn("Firestore transferArchivedFormToMinistryRep sync warning:", error);
+  }
+}
+
+export async function signAndEndorseByMinistryRep(
+  archiveId: string,
+  repName: string,
+  qrData: string,
+  decision: string = 'اعتماد موجه وتوصيات وزارية',
+  notes: string = '',
+  nextStage: 'admin_transferred_to_principal' | 'completed' = 'admin_transferred_to_principal'
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const archives = getSandboxData<ArchivedForm[]>(SANDBOX_ARCHIVED_FORMS_KEY, INITIAL_SANDBOX_ARCHIVED_FORMS);
+  const idx = archives.findIndex(a => a.id === archiveId);
+  let targetForm: Partial<ArchivedForm> = {};
+
+  if (idx !== -1) {
+    archives[idx] = {
+      ...archives[idx],
+      workflowStage: nextStage,
+      isMinistryRepSigned: true,
+      ministryRepSignedAt: nowIso,
+      ministryRepReviewedAt: nowIso,
+      ministryRepName: repName,
+      ministryRepSignatureQrData: qrData,
+      ministryRepDecision: decision,
+      ministryRepNotes: notes,
+      updatedAt: nowIso
+    };
+    targetForm = archives[idx];
+    setSandboxData(SANDBOX_ARCHIVED_FORMS_KEY, archives);
+  }
+
+  if (isSandboxActive()) return;
+
+  try {
+    await setDoc(doc(db, 'archived_forms', archiveId), {
+      ...JSON.parse(JSON.stringify(targetForm)),
+      workflowStage: nextStage,
+      isMinistryRepSigned: true,
+      ministryRepSignedAt: nowIso,
+      ministryRepReviewedAt: nowIso,
+      ministryRepName: repName,
+      ministryRepSignatureQrData: qrData,
+      ministryRepDecision: decision,
+      ministryRepNotes: notes,
+      updatedAt: nowIso
+    }, { merge: true });
+    notifyArchivedFormsSync();
+  } catch (error) {
+    console.warn("Firestore signAndEndorseByMinistryRep sync warning:", error);
   }
 }
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { School, Sparkles, ClipboardList, ShieldCheck, X, Lock, LogIn, ArrowRight, ShieldAlert, Key, Users, CheckCircle, LayoutDashboard, FileSpreadsheet, BarChart3, CheckSquare, Settings, BookOpen, LogOut, Briefcase, Download, FileText, FileUp, Printer, Scale, QrCode, CheckCheck, Eye } from 'lucide-react';
+import { School, Sparkles, ClipboardList, ShieldCheck, X, Lock, LogIn, ArrowRight, ShieldAlert, Key, Users, CheckCircle, LayoutDashboard, FileSpreadsheet, BarChart3, CheckSquare, Settings, BookOpen, LogOut, Briefcase, Download, FileText, FileUp, Printer, Scale, QrCode, CheckCheck, Eye, Building2 } from 'lucide-react';
 import { 
   motion, 
   AnimatePresence 
@@ -55,6 +55,8 @@ import {
   signArchivedExaminerForm,
   transferArchivedFormToPrincipal,
   transferArchivedFormToTeacher,
+  transferArchivedFormToMinistryRep,
+  signAndEndorseByMinistryRep,
   markAssessmentReadByExaminer,
   updateArchivedFormStudents,
   getFormDesignSettings,
@@ -81,6 +83,7 @@ import { TeacherUploadsView } from './components/TeacherUploadsView';
 import { SchoolPrincipalObserver, isSameSchool } from './components/SchoolPrincipalObserver';
 import { SchoolArchiveView } from './components/SchoolArchiveView';
 import { FormTrackerView } from './components/FormTrackerView';
+import { MinistryRepDashboard } from './components/MinistryRepDashboard';
 import { FormStyleController } from './components/FormStyleController';
 import { SignatureVerifierView } from './components/SignatureVerifierView';
 import { InspectionPlanManager } from './components/InspectionPlanManager';
@@ -1969,7 +1972,7 @@ export default function App() {
   };
 
   // --- EMAIL AND PASSWORD AUTHENTICATION & DIRECT TESTING GATEWAY ---
-  const handleAuthForCredentials = async (email: string, pass: string, roleSelection: 'none' | 'director' | 'teacher' | 'moderator' | 'admin') => {
+  const handleAuthForCredentials = async (email: string, pass: string, roleSelection: 'none' | 'director' | 'teacher' | 'moderator' | 'admin' | 'ministry_rep') => {
     const trimmedEmail = email.trim().toLowerCase();
 
     // Check account vs selected role compatibility
@@ -1981,6 +1984,7 @@ export default function App() {
     const isAccountDirector = trimmedEmail === 'school@moe.om';
     const isAccountTeacher = trimmedEmail === 'teacher@moe.om';
     const isAccountModerator = trimmedEmail === 'moderator@moe.om';
+    const isAccountMinistryRep = trimmedEmail === 'ministry@moe.om';
 
     const effectiveRoleSelection = isAccountAdmin && (!roleSelection || roleSelection === 'none')
       ? 'admin'
@@ -2000,6 +2004,10 @@ export default function App() {
       return;
     }
     if (isAccountModerator && effectiveRoleSelection !== 'moderator') {
+      handleError("choose your correct role");
+      return;
+    }
+    if (isAccountMinistryRep && effectiveRoleSelection !== 'ministry_rep') {
       handleError("choose your correct role");
       return;
     }
@@ -2091,7 +2099,13 @@ export default function App() {
     }
 
     // 2. Demo Ministerial Staff Accounts
-    const demoAccounts: Record<string, { uid: string; name: string; role: 'school' | 'moderator'; roleType?: 'administrative' | 'teacher'; schoolName?: string; subject?: string; jobTitle: string }> = {
+    const demoAccounts: Record<string, { uid: string; name: string; role: 'school' | 'moderator' | 'ministry_rep'; roleType?: 'administrative' | 'teacher'; schoolName?: string; subject?: string; jobTitle: string }> = {
+      'ministry@moe.om': {
+        uid: 'demo-ministry-1',
+        name: 'د. راشد بن سيف المقبالي',
+        role: 'ministry_rep',
+        jobTitle: 'ممثل وزارة التربية والتعليم'
+      },
       'school@moe.om': {
         uid: 'demo-school-1',
         name: 'أ. وليد الخروصي (مدير مدرسة الدقم)',
@@ -2373,7 +2387,7 @@ export default function App() {
     setShowUploadForm(false);
   };
 
-  const handleSwitchSandboxUser = async (role: 'school' | 'moderator' | 'admin' | 'teacher') => {
+  const handleSwitchSandboxUser = async (role: 'school' | 'moderator' | 'admin' | 'teacher' | 'ministry_rep') => {
     localStorage.setItem('oman_moe_sim_role', role);
     const simUid = 
       role === 'school' 
@@ -2382,6 +2396,8 @@ export default function App() {
         ? 'demo-teacher-1' 
         : role === 'admin' 
         ? 'demo-admin-1' 
+        : role === 'ministry_rep'
+        ? 'demo-ministry-1'
         : 'demo-mod-1';
     
     setDataLoading(true);
@@ -3124,6 +3140,32 @@ export default function App() {
                   language={language}
                   userProfile={userProfile}
                   onSelectForm={(form) => setSelectedApprovedForm(form)}
+                  onOpenInArchive={(form) => {
+                    setTrackerSelectedFormId(form.id);
+                    setSelectedApprovedForm(form);
+                    setPrincipalTab('archive');
+                  }}
+                  onTransferToPrincipal={async (archiveId, adminName) => {
+                    await transferArchivedFormToPrincipal(archiveId, adminName);
+                    await fetchArchivedFormsList();
+                  }}
+                  onTransferToMinistryRep={async (archiveId, adminName) => {
+                    await transferArchivedFormToMinistryRep(archiveId, adminName);
+                    await fetchArchivedFormsList();
+                  }}
+                  onSignPrincipal={async (archiveId, pName, qrData, stampUrl) => {
+                    await signArchivedForm(archiveId, pName, qrData, stampUrl);
+                    await fetchArchivedFormsList();
+                  }}
+                  onSignTeacher={async (archiveId, tName, qrData) => {
+                    await signArchivedTeacherForm(archiveId, tName, qrData);
+                    await fetchArchivedFormsList();
+                  }}
+                  onSignExaminer={async (archiveId, eName, qrData, conformanceStatus, hasGradeRevisions) => {
+                    await signArchivedExaminerForm(archiveId, eName, qrData, undefined, conformanceStatus, hasGradeRevisions);
+                    await fetchArchivedFormsList();
+                  }}
+                  onSuccess={handleSuccess}
                 />
               </div>
             ) : userProfile.role === 'school' && (userProfile.roleType === 'administrative' || userProfile.jobTitle?.includes('مدير')) && principalTab === 'archive' ? (
@@ -3147,10 +3189,34 @@ export default function App() {
                     await transferArchivedFormToPrincipal(archiveId, adminName);
                     await fetchArchivedFormsList();
                   }}
+                  onTransferToMinistryRep={async (archiveId, adminName) => {
+                    await transferArchivedFormToMinistryRep(archiveId, adminName);
+                    await fetchArchivedFormsList();
+                  }}
                   userProfile={userProfile}
                   onSuccess={handleSuccess}
                   initialSelectedFormId={trackerSelectedFormId}
                   onOpenTracker={() => setActiveTab('tracker')}
+                />
+              </div>
+            ) : userProfile.role === 'ministry_rep' ? (
+              <div className="w-full space-y-6 animate-in fade-in duration-200">
+                <MinistryRepDashboard
+                  userProfile={userProfile}
+                  archivedForms={archivedForms}
+                  language={language}
+                  onSignAndEndorse={async (archiveId, repName, qrData, decision, notes, nextStage) => {
+                    await signAndEndorseByMinistryRep(archiveId, repName, qrData, decision, notes, nextStage);
+                    await fetchArchivedFormsList();
+                  }}
+                  onOpenOfficialFormPreview={(form) => {
+                    setTrackerSelectedFormId(form.id);
+                    setSelectedApprovedForm(form);
+                    setActiveTab('archive');
+                  }}
+                  onRefreshForms={fetchArchivedFormsList}
+                  onSuccess={handleSuccess}
+                  onError={handleError}
                 />
               </div>
             ) : userProfile.role === 'school' && !(userProfile.roleType === 'administrative' || userProfile.jobTitle?.includes('مدير')) ? (
@@ -5963,6 +6029,10 @@ export default function App() {
                 await transferArchivedFormToPrincipal(archiveId, adminName);
                 await fetchArchivedFormsList();
               }}
+              onTransferToMinistryRep={async (archiveId, adminName) => {
+                await transferArchivedFormToMinistryRep(archiveId, adminName);
+                await fetchArchivedFormsList();
+              }}
               onSignPrincipal={async (archiveId, pName, qrData, stampUrl) => {
                 await signArchivedForm(archiveId, pName, qrData, stampUrl);
                 await fetchArchivedFormsList();
@@ -5998,6 +6068,10 @@ export default function App() {
                 }}
                 onTransferToPrincipal={async (archiveId, adminName) => {
                   await transferArchivedFormToPrincipal(archiveId, adminName);
+                  await fetchArchivedFormsList();
+                }}
+                onTransferToMinistryRep={async (archiveId, adminName) => {
+                  await transferArchivedFormToMinistryRep(archiveId, adminName);
                   await fetchArchivedFormsList();
                 }}
                 userProfile={userProfile}

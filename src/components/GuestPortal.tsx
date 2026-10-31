@@ -2,7 +2,7 @@ import { supabase } from '../supabaseClient';
 import { auth } from '../services/firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import React, { useState } from 'react';
-import { School, Users, ClipboardList, Lock, LogIn, ShieldAlert, X, Mail, Key, CheckCircle2, RotateCcw, ChevronDown, Check } from 'lucide-react';
+import { School, Users, ClipboardList, Lock, LogIn, ShieldAlert, X, Mail, Key, CheckCircle2, RotateCcw, ChevronDown, Check, Building2 } from 'lucide-react';
 import { OMAN_WUSTA_SCHOOLS } from '../data/schoolsData';
 
 interface GuestPortalProps {
@@ -13,8 +13,8 @@ interface GuestPortalProps {
   popupErrorDetected: boolean;
   operationNotAllowedError: string | null;
   setOperationNotAllowedError: (err: string | null) => void;
-  selectedAuthRole: 'none' | 'director' | 'teacher' | 'moderator' | 'admin';
-  setSelectedAuthRole: (role: 'none' | 'director' | 'teacher' | 'moderator' | 'admin') => void;
+  selectedAuthRole: 'none' | 'director' | 'teacher' | 'moderator' | 'admin' | 'ministry_rep';
+  setSelectedAuthRole: (role: 'none' | 'director' | 'teacher' | 'moderator' | 'admin' | 'ministry_rep') => void;
   
   isSignUpMode: boolean;
   setIsSignUpMode: (mode: boolean) => void;
@@ -44,7 +44,7 @@ interface GuestPortalProps {
     schoolName?: string,
     subject?: string
   ) => Promise<void>;
-  handleAuthForCredentials: (email: string, pass: string, roleSelection: 'none' | 'director' | 'teacher' | 'moderator' | 'admin') => Promise<void>;
+  handleAuthForCredentials: (email: string, pass: string, roleSelection: 'none' | 'director' | 'teacher' | 'moderator' | 'admin' | 'ministry_rep') => Promise<void>;
   handleSignIn: () => Promise<void>;
   authLoading: boolean;
   onLogoClick?: () => void;
@@ -333,6 +333,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   setForgotPasswordMode(false);
                   setIsSignUpMode(false);
                   setForgotError(null);
+                  setLoginEmail('school@moe.om');
+                  setLoginPassword('Skype123@');
                 }}
                 className={`p-2.5 rounded-xl border text-right flex items-center gap-2 transition-all cursor-pointer ${
                   selectedAuthRole === 'director'
@@ -355,6 +357,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   setForgotPasswordMode(false);
                   setIsSignUpMode(false);
                   setForgotError(null);
+                  setLoginEmail('teacher@moe.om');
+                  setLoginPassword('Skype123@');
                 }}
                 className={`p-2.5 rounded-xl border text-right flex items-center gap-2 transition-all cursor-pointer ${
                   selectedAuthRole === 'teacher'
@@ -377,6 +381,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   setForgotPasswordMode(false);
                   setIsSignUpMode(false);
                   setForgotError(null);
+                  setLoginEmail('moderator@moe.om');
+                  setLoginPassword('Skype123@');
                 }}
                 className={`p-2.5 rounded-xl border text-right flex items-center gap-2 transition-all cursor-pointer ${
                   selectedAuthRole === 'moderator'
@@ -399,6 +405,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                   setForgotPasswordMode(false);
                   setIsSignUpMode(false);
                   setForgotError(null);
+                  setLoginEmail('hossam9866@moe.om');
+                  setLoginPassword('Skype123@');
                 }}
                 className={`p-2.5 rounded-xl border text-right flex items-center gap-2 transition-all cursor-pointer ${
                   selectedAuthRole === 'admin'
@@ -411,6 +419,31 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                 </div>
                 <div className="text-right truncate">
                   <div className="text-[11px] font-bold truncate">{language === 'ar' ? "مدير النظام" : "Admin"}</div>
+                </div>
+              </button>
+
+              {/* 5th Mobile Option: ممثل الوزارة */}
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedAuthRole('ministry_rep');
+                  setForgotPasswordMode(false);
+                  setIsSignUpMode(false);
+                  setForgotError(null);
+                  setLoginEmail('ministry@moe.om');
+                  setLoginPassword('Skype123@');
+                }}
+                className={`col-span-2 p-2.5 rounded-xl border text-right flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                  selectedAuthRole === 'ministry_rep'
+                    ? 'bg-purple-800 text-white font-bold border-purple-900 shadow-sm ring-2 ring-purple-400'
+                    : 'bg-purple-50/70 hover:bg-purple-100/70 text-purple-900 border-purple-200'
+                }`}
+              >
+                <div className={`p-1.5 rounded-lg shrink-0 ${selectedAuthRole === 'ministry_rep' ? 'bg-amber-300 text-purple-950' : 'bg-purple-200 text-purple-800'}`}>
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div className="text-center truncate">
+                  <div className="text-[11px] font-black truncate">{language === 'ar' ? "ممثل الوزارة (الفحص النهائي)" : "Ministry Representative"}</div>
                 </div>
               </button>
             </div>
@@ -493,6 +526,18 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     </div>
                   </>
                 )}
+                {selectedAuthRole === 'ministry_rep' && (
+                  <>
+                    <div className="p-2 rounded-xl bg-purple-700 text-white shrink-0">
+                      <Building2 className="w-4 h-4 text-amber-300" />
+                    </div>
+                    <div className="text-right">
+                      <h4 className="font-bold text-purple-950 text-xs sm:text-sm">
+                        {language === 'ar' ? "ممثل الوزارة" : "Ministry Representative"}
+                      </h4>
+                    </div>
+                  </>
+                )}
               </div>
               <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform duration-200 ${roleDropdownOpen ? 'rotate-180' : ''}`} />
             </button>
@@ -538,6 +583,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     setForgotPasswordMode(false);
                     setIsSignUpMode(false);
                     setForgotError(null);
+                    setLoginEmail('school@moe.om');
+                    setLoginPassword('Skype123@');
                   }}
                   className={`w-full text-right p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-3 ${
                     selectedAuthRole === 'director'
@@ -551,7 +598,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     </div>
                     <div className="text-right leading-tight">
                       <p className="font-bold text-xs">{language === 'ar' ? "مدير مدرسة" : "School Principal / Manager"}</p>
-                      <p className="text-[9.5px] opacity-75">{language === 'ar' ? "إدارة الصلاحيات والحصص المدرسية" : "Manage school quotas"}</p>
+                      <p className="text-[9.5px] opacity-75">{language === 'ar' ? "إدارة الصلاحيات وتوقيع وختم الاستمارات" : "Manage school quotas & sign forms"}</p>
                     </div>
                   </div>
                   {selectedAuthRole === 'director' && <Check className="w-4 h-4 text-amber-600 shrink-0" />}
@@ -566,6 +613,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     setForgotPasswordMode(false);
                     setIsSignUpMode(false);
                     setForgotError(null);
+                    setLoginEmail('teacher@moe.om');
+                    setLoginPassword('Skype123@');
                   }}
                   className={`w-full text-right p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-3 ${
                     selectedAuthRole === 'teacher'
@@ -579,7 +628,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     </div>
                     <div className="text-right leading-tight">
                       <p className="font-bold text-xs">{language === 'ar' ? "معلم مادة" : "Subject Teacher"}</p>
-                      <p className="text-[9.5px] opacity-75">{language === 'ar' ? "رفع مسودات الأسئلة وملفات التقييم" : "Upload drafts & PDF sheets"}</p>
+                      <p className="text-[9.5px] opacity-75">{language === 'ar' ? "رفع مسودات الأسئلة والتوقيع بالعلم" : "Upload drafts & sign to acknowledge"}</p>
                     </div>
                   </div>
                   {selectedAuthRole === 'teacher' && <Check className="w-4 h-4 text-teal-600 shrink-0" />}
@@ -594,6 +643,8 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     setForgotPasswordMode(false);
                     setIsSignUpMode(false);
                     setForgotError(null);
+                    setLoginEmail('moderator@moe.om');
+                    setLoginPassword('Skype123@');
                   }}
                   className={`w-full text-right p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-3 ${
                     selectedAuthRole === 'moderator'
@@ -611,6 +662,68 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     </div>
                   </div>
                   {selectedAuthRole === 'moderator' && <Check className="w-4 h-4 text-emerald-600 shrink-0" />}
+                </button>
+
+                {/* Option 4: admin */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAuthRole('admin');
+                    setRoleDropdownOpen(false);
+                    setForgotPasswordMode(false);
+                    setIsSignUpMode(false);
+                    setForgotError(null);
+                    setLoginEmail('hossam9866@moe.om');
+                    setLoginPassword('Skype123@');
+                  }}
+                  className={`w-full text-right p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                    selectedAuthRole === 'admin'
+                      ? 'bg-slate-900 border border-slate-950 text-white font-bold'
+                      : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-1.5 rounded-lg ${selectedAuthRole === 'admin' ? 'bg-amber-400 text-slate-950' : 'bg-slate-100 text-slate-500'}`}>
+                      <Lock className="w-4 h-4" />
+                    </div>
+                    <div className="text-right leading-tight">
+                      <p className="font-bold text-xs">{language === 'ar' ? "مدير النظام" : "System Admin"}</p>
+                      <p className={`text-[9.5px] ${selectedAuthRole === 'admin' ? 'text-slate-300' : 'opacity-75'}`}>
+                        {language === 'ar' ? "إدارة المنظومة وتحويل الاستمارات" : "Portal administration & transfer"}
+                      </p>
+                    </div>
+                  </div>
+                  {selectedAuthRole === 'admin' && <Check className="w-4 h-4 text-amber-400 shrink-0" />}
+                </button>
+
+                {/* Option 5: ministry_rep */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedAuthRole('ministry_rep');
+                    setRoleDropdownOpen(false);
+                    setForgotPasswordMode(false);
+                    setIsSignUpMode(false);
+                    setForgotError(null);
+                    setLoginEmail('ministry@moe.om');
+                    setLoginPassword('Skype123@');
+                  }}
+                  className={`w-full text-right p-3 rounded-xl transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                    selectedAuthRole === 'ministry_rep'
+                      ? 'bg-purple-50 border border-purple-200 text-purple-950 font-bold'
+                      : 'hover:bg-slate-50 text-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-1.5 rounded-lg ${selectedAuthRole === 'ministry_rep' ? 'bg-purple-700 text-white' : 'bg-purple-100 text-purple-800'}`}>
+                      <Building2 className="w-4 h-4 text-amber-300" />
+                    </div>
+                    <div className="text-right leading-tight">
+                      <p className="font-bold text-xs">{language === 'ar' ? "ممثل الوزارة" : "Ministry Representative"}</p>
+                      <p className="text-[9.5px] opacity-75">{language === 'ar' ? "مراجعة واعتماد استمارات الفحص النهائي غير المطابقة" : "Final audit non-conforming form review"}</p>
+                    </div>
+                  </div>
+                  {selectedAuthRole === 'ministry_rep' && <Check className="w-4 h-4 text-purple-600 shrink-0" />}
                 </button>
 
               </div>
@@ -634,6 +747,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     {selectedAuthRole === 'teacher' && (language === 'ar' ? "إنشاء حساب معلم مادة" : "Register Subject Teacher")}
                     {selectedAuthRole === 'moderator' && (language === 'ar' ? "إنشاء حساب مدقق مادة" : "Register Subject Auditor")}
                     {selectedAuthRole === 'admin' && (language === 'ar' ? "إنشاء حساب مسؤول النظام" : "Register Admin Profile")}
+                    {selectedAuthRole === 'ministry_rep' && (language === 'ar' ? "إنشاء حساب ممثل الوزارة" : "Register Ministry Representative")}
                   </span>
                 ) : (
                   <span>
@@ -641,6 +755,7 @@ export const GuestPortal: React.FC<GuestPortalProps> = ({
                     {selectedAuthRole === 'teacher' && (language === 'ar' ? "تسجيل دخول معلم مادة" : "Login Subject Teacher")}
                     {selectedAuthRole === 'moderator' && (language === 'ar' ? "تسجيل دخول مدقق مادة" : "Login Subject Auditor")}
                     {selectedAuthRole === 'admin' && (language === 'ar' ? "تسجيل دخول مسؤول النظام" : "Login Portal Administrator")}
+                    {selectedAuthRole === 'ministry_rep' && (language === 'ar' ? "تسجيل دخول ممثل الوزارة" : "Login Ministry Representative")}
                   </span>
                 )}
               </h3>

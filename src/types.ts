@@ -1,4 +1,4 @@
-export type UserRole = 'school' | 'moderator' | 'admin';
+export type UserRole = 'school' | 'moderator' | 'admin' | 'ministry_rep';
 
 export interface UserProfile {
   uid: string;
@@ -11,7 +11,7 @@ export interface UserProfile {
   appointmentYear?: string;
   wilaya?: string;
   directorate?: string;
-  jobTitle?: 'معلم' | 'مدقق' | 'مدير مدرسة' | 'مدير النظام' | string;
+  jobTitle?: 'معلم' | 'مدقق' | 'مدير مدرسة' | 'مدير النظام' | 'ممثل الوزارة' | string;
   subject?: string;
   phoneNumber?: string;
   gradesTaught?: string[];
@@ -139,10 +139,28 @@ export interface ArchivedForm {
   conformanceStatus?: 'conforming' | 'non-conforming';
   hasGradeRevisions?: boolean;
   
-  // File processing lifecycle stage (Exact 4-step sequence: Auditor -> Admin -> Principal -> Teacher -> Completed)
-  workflowStage?: 'examiner_submitted_to_admin' | 'admin_transferred_to_principal' | 'principal_signed_transferred_to_teacher' | 'completed';
+  // File processing lifecycle stage (Auditor -> Admin -> (if non-conforming in final audit: Ministry Rep) -> Principal -> Teacher -> Completed)
+  workflowStage?: 'examiner_submitted_to_admin' | 'admin_transferred_to_principal' | 'transferred_to_ministry_rep' | 'ministry_rep_reviewed' | 'principal_signed_transferred_to_teacher' | 'completed';
   adminReviewedAt?: string;
   adminReviewedBy?: string;
+  
+  // Ministry Representative escalation and resolution (for non-conforming final inspection forms)
+  ministryRepTransferredAt?: string;
+  ministryRepTransferredBy?: string;
+  ministryRepReviewedAt?: string;
+  ministryRepName?: string;
+  ministryRepDecision?: string;
+  ministryRepNotes?: string;
+  isMinistryRepSigned?: boolean;
+  ministryRepSignedAt?: string;
+  ministryRepSignatureQrData?: string;
+  ministryRepSignatureStampUrl?: string;
+  
+  // Team Leader signature (performed by system admin on non-conforming final audit forms)
+  isTeamLeaderSigned?: boolean;
+  teamLeaderSignedAt?: string;
+  teamLeaderSignedName?: string;
+  teamLeaderSignatureQrData?: string;
   
   createdAt: string;
   updatedAt: string;

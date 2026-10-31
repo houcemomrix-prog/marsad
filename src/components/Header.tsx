@@ -50,6 +50,10 @@ const getUserSubtitle = (profile: UserProfile, lang: Language): string => {
     }
   }
 
+  if (profile.role === 'ministry_rep' || profile.jobTitle === 'ممثل الوزارة') {
+    return lang === 'ar' ? 'ممثل وزارة التربية والتعليم' : 'Ministry Representative';
+  }
+
   const role = profile.role;
   const roleType = profile.roleType;
   // Force jobTitle to "مدقق" if role is moderator, regardless of what's saved in the profile
@@ -94,7 +98,7 @@ interface HeaderProps {
   onLogout: () => void;
   onLoginRequest: () => void;
   onAdminLogin: (email?: string, pass?: string) => void;
-  onSwitchSandboxUser: (role: 'school' | 'moderator' | 'admin' | 'teacher') => void;
+  onSwitchSandboxUser: (role: 'school' | 'moderator' | 'admin' | 'teacher' | 'ministry_rep') => void;
   authLoading: boolean;
   guestView?: 'welcome' | 'login-portal' | 'admin-portal' | 'forgot-password';
   onSelectGuestView?: (view: 'welcome' | 'login-portal' | 'admin-portal' | 'forgot-password') => void;
