@@ -1265,28 +1265,63 @@ export function WhatsAppAuditChat({
 
                 </div>
 
-                {/* Row 2: Side-by-Side Dual Tables matching official template */}
-                <div className="flex flex-row gap-3.5 w-full my-1" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px' }}>
+                {/* Row 2: Moderation Ledger & Technical Observations Tables - Identical for Continuous and Final Audit */}
+                <div className="grid grid-cols-12 gap-3.5 my-1" dir="rtl" style={{ display: 'flex', flexDirection: 'row', width: '100%', gap: '14px' }}>
                   
-                  {/* Right Table: Sample Students (6 rows) */}
-                  <div style={{ width: '42%', flex: '0 0 42%', boxSizing: 'border-box' }} className="flex flex-col">
-                    <table className="w-full text-right border-collapse border-2 border-black h-full" style={{ border: '2px solid black', width: '100%' }}>
+                  {/* Right col-span-5: Grades Audit Ledger */}
+                  <div className="col-span-5 flex flex-col border-2 border-[#821315] rounded overflow-hidden bg-white" style={{ width: '41.5%', flex: '0 0 41.5%', boxSizing: 'border-box' }}>
+                    <div className="bg-[#821315] text-white px-3 py-1.5 text-[15px] font-black text-center">
+                      {language === 'ar' ? 'جدول رصد ومطابقة عينة درجات الطلاب والمشغولات الدراسية' : 'Student Sample Grades Moderation Ledger'}
+                    </div>
+                    <table className="w-full text-right text-[15px] border-collapse leading-normal printable-grades-table" style={{ tableLayout: 'fixed', width: '100%' }}>
                       <thead>
-                        <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '2px solid black' }}>
-                          <th className="py-2.5 px-2 border-l-2 border-black text-center text-[15px]" style={{ width: '15%', borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>م</th>
-                          <th className="py-2.5 px-3 text-center text-[15px] font-black" style={{ backgroundColor: '#d1d5db' }}>اسم الطالب</th>
+                        <tr className="bg-[#821315]/5 text-[#821315] font-black text-[14px] border-b-2 border-[#821315]/45">
+                          <th className="py-2 px-1.5 border-l border-[#821315]/45 text-center align-middle" style={{ width: '6%' }}>م</th>
+                          <th className="py-2 px-3 border-l border-[#821315]/45 text-right align-middle" style={{ width: '32%' }}>{language === 'ar' ? 'اسم الطالب/ة' : 'Student Name'}</th>
+                          <th className="py-2 px-2 border-l border-[#821315]/45 text-center align-middle" style={{ width: '10%' }}>الصف</th>
+                          <th className="py-2 px-3 border-l border-[#821315]/45 align-middle" style={{ width: '16%' }}>الأداة</th>
+                          <th className="p-0 border-l border-[#821315]/45 text-center align-top" colSpan={2} style={{ width: '18%' }}>
+                            <div className="flex flex-col w-full h-full">
+                              <div className="flex items-center justify-center w-full font-black text-[14px] text-[#821315] py-1 border-b border-[#821315]/45">
+                                {language === 'ar' ? 'الدرجة' : 'Grade'}
+                              </div>
+                              <div className="grid grid-cols-2 text-[13px] font-black h-full" style={{ display: 'flex', flexDirection: 'row', width: '100%' }}>
+                                <div className="flex items-center justify-center border-l border-[#821315]/45 px-1 py-1 bg-[#821315]/10" style={{ width: '50%' }}>
+                                  {language === 'ar' ? 'قبل' : 'Before'}
+                                </div>
+                                <div className="flex items-center justify-center px-1 py-1 bg-[#821315]/10" style={{ width: '50%' }}>
+                                  {language === 'ar' ? 'بعد' : 'After'}
+                                </div>
+                              </div>
+                            </div>
+                          </th>
+                          <th className="py-2 px-3 text-center border-l border-[#821315]/45 font-black text-[14px] text-[#821315] align-middle" style={{ width: '18%' }}>{language === 'ar' ? 'سبب التعديل' : 'Modification Reason'}</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y-2 divide-black">
-                        {Array.from({ length: 6 }).map((_, idx) => {
+                      <tbody className="divide-y divide-[#821315]/45 text-slate-700">
+                        {Array.from({ length: Math.max(6, (previewFormModal.students || []).length) }).map((_, idx) => {
                           const s = previewFormModal.students && previewFormModal.students[idx];
+                          const gradeNumber = previewFormModal.grade ? previewFormModal.grade.replace(/[^\d]/g, '') : '10';
+                          const gradeClassStr = s?.gradeClass || `${gradeNumber}/1`;
+                          
+                          const afterVal = s?.scoreAfter !== undefined ? s.scoreAfter : (s?.mark !== undefined ? s.mark : (s ? '10' : ''));
+                          const beforeVal = s?.scoreBefore !== undefined ? s.scoreBefore : afterVal;
+                          const reasonVal = s?.reason || (s?.notes && ['1', '2', '3', '4', '5', '6'].includes(s.notes.trim()) ? s.notes.trim() : (beforeVal !== afterVal && beforeVal !== '' ? '1' : 'لا يوجد'));
+
                           return (
-                            <tr key={`chat-preview-sample-${idx}`} className="border-b-2 border-black last:border-b-0 h-[46px]" style={{ borderBottom: '2px solid black' }}>
-                              <td className="py-2 px-2 text-center font-black text-[15px] text-black" style={{ borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
-                                {idx + 1}
-                              </td>
-                              <td className="py-2 px-3 bg-white font-bold text-slate-900 text-[15px]">
-                                {s ? (s.name || '') : ''}
+                            <tr key={`chat-preview-student-${idx}`} className="hover:bg-slate-50/20">
+                              <td className="py-2 px-1.5 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315]">{idx + 1}</td>
+                              <td className="py-2 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words text-slate-800">{s?.name || ''}</td>
+                              <td className="py-2 px-2 border-l border-[#821315]/45 text-center font-semibold font-mono">{s ? gradeClassStr : ''}</td>
+                              <td className="py-2 px-3 border-l border-[#821315]/45 whitespace-normal break-words font-bold text-slate-755">{s?.tool || s?.level || (s ? 'اختبار قصير' : '')}</td>
+                              <td className="py-2 px-1.5 border-l border-dashed border-[#821315]/45 text-center font-mono font-black text-black text-[14px] bg-slate-50">{beforeVal}</td>
+                              <td className="py-2 px-1.5 border-l border-[#821315]/45 text-center font-mono font-black text-red-900 text-[14px] bg-red-50">{afterVal}</td>
+                              <td className="py-2 px-3 text-center font-bold whitespace-normal break-words text-[12px] text-slate-800">
+                                {['1', '2', '3', '4', '5', '6'].includes(reasonVal?.trim() || '') ? (
+                                  <span className="font-mono text-[#821315] font-black text-[13px] bg-red-50/50 px-2 py-0.5 rounded">{reasonVal}</span>
+                                ) : (
+                                  <span className="text-black font-black block text-center text-[13px]">{s ? (reasonVal === 'لا يوجد' || !reasonVal ? (language === 'ar' ? 'لا يوجد' : 'None') : reasonVal) : ''}</span>
+                                )}
                               </td>
                             </tr>
                           );
@@ -1295,36 +1330,34 @@ export function WhatsAppAuditChat({
                     </table>
                   </div>
 
-                  {/* Left Table: Continuous Assessment Tools & Technical Notes (4 rows) */}
-                  <div style={{ width: '58%', flex: '0 0 58%', boxSizing: 'border-box' }} className="flex flex-col">
-                    <table className="w-full text-right border-collapse border-2 border-black h-full" style={{ border: '2px solid black', width: '100%' }}>
+                  {/* Left col-span-7: Technical Observations */}
+                  <div className="col-span-7 border-2 border-[#821315] rounded overflow-hidden bg-white flex flex-col justify-between" style={{ width: '57%', flex: '0 0 57%', boxSizing: 'border-box' }}>
+                    <div className="bg-[#821315]/5 text-[#821315] px-3 py-1.5 text-[15px] font-black text-center border-b-2 border-[#821315]">
+                      {language === 'ar' ? 'الملاحظات الفنية على أدوات التقويم المستمر - التقرير المعتمد للجنة' : 'Technical Observations / Audit Comments'}
+                    </div>
+                    <table className="w-full text-right text-[15px] border-collapse leading-normal flex-1" style={{ tableLayout: 'fixed', width: '100%' }}>
                       <thead>
-                        <tr className="bg-slate-200 text-black font-black text-center" style={{ backgroundColor: '#d1d5db', borderBottom: '2px solid black' }}>
-                          <th className="py-2 px-2 border-l-2 border-black text-center text-[14px] leading-tight font-black" style={{ width: '28%', borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
-                            أدوات<br />التقويم<br />المستمر
-                          </th>
-                          <th className="py-2 px-3 text-center text-[15px] font-black" style={{ backgroundColor: '#d1d5db' }}>
-                            الملاحظات الفنية وجوانب التطوير
-                          </th>
+                        <tr className="bg-slate-50 text-slate-600 font-black text-[14px] border-b-2 border-[#821315]/45">
+                          <th className="py-2 px-3 border-l border-[#821315]/45 text-center" style={{ width: '15%' }}>الصف</th>
+                          <th className="py-2 px-3 border-l border-[#821315]/45" style={{ width: '30%' }}>أداة التقويم</th>
+                          <th className="py-2 px-3" style={{ width: '55%' }}>موجز الملاحظات الوزارية والفنية</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y-2 divide-black">
-                        {Array.from({ length: 4 }).map((_, idx) => {
-                          const defaultTools = ['اختبار قصير 1', 'عرض شفوي', 'سؤال قصير', 'واجب منزلي'];
+                      <tbody className="divide-y divide-[#821315]/45 text-slate-700">
+                        {Array.from({ length: Math.max(4, (previewFormModal.observations || []).length) }).map((_, idx) => {
                           const obs = previewFormModal.observations && previewFormModal.observations[idx];
-                          const toolName = obs?.tool || defaultTools[idx];
+                          const defaultTools = ['اختبار قصير 1', 'عرض شفوي', 'سؤال قصير', 'واجب منزلي'];
+                          const toolName = obs?.tool || (obs ? defaultTools[idx % defaultTools.length] : defaultTools[idx % defaultTools.length]);
+                          const gradeNumber = previewFormModal.grade ? previewFormModal.grade.replace(/[^\d]/g, '') : '10';
+                          const gradeClassStr = obs?.gradeClass || `${gradeNumber}/1`;
                           const noteText = obs?.notes || '';
+
                           return (
-                            <tr key={`chat-preview-obs-${idx}`} className="border-b-2 border-black last:border-b-0 h-[69px]" style={{ borderBottom: '2px solid black' }}>
-                              <td className="py-2 px-2 text-center font-black text-[13px] text-slate-950 leading-snug" style={{ borderLeft: '2px solid black', backgroundColor: '#d1d5db' }}>
-                                {toolName}
-                              </td>
-                              <td className="py-2.5 px-3 bg-white text-slate-900 text-[13.5px] leading-relaxed align-top font-medium">
-                                {noteText ? (
-                                  <div className="font-semibold text-slate-850 leading-relaxed whitespace-pre-wrap">{noteText}</div>
-                                ) : (
-                                  <div className="h-full min-h-[48px] flex items-center justify-center text-slate-300 text-xs italic select-none"></div>
-                                )}
+                            <tr key={`chat-preview-obs-${idx}`} className="hover:bg-slate-50/20">
+                              <td className="py-2 px-3 border-l border-[#821315]/45 text-center font-bold bg-[#821315]/5 text-[#821315]">{obs ? gradeClassStr : ''}</td>
+                              <td className="py-2 px-3 border-l border-[#821315]/45 font-bold whitespace-normal break-words">{obs ? toolName : ''}</td>
+                              <td className="py-2 px-3 text-slate-950 font-black text-right whitespace-normal break-words leading-relaxed text-[13.5px]">
+                                {noteText || (obs ? (language === 'ar' ? `ملاحظة فنية رقم ${idx + 1}` : `Observation No. (${idx + 1})`) : '')}
                               </td>
                             </tr>
                           );

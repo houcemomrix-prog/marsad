@@ -156,20 +156,20 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <button
             type="button"
             onClick={() => {
-              onSelectTab('overview');
-              onSelectPrincipalTab?.('catalog');
+              onSelectTab('tracker');
+              onToggleUploadForm(false);
             }}
             className={`flex flex-col items-center justify-center flex-1 py-1 px-1 rounded-xl transition-all cursor-pointer ${
-              activeTab === 'overview' && principalTab === 'catalog'
+              activeTab === 'tracker'
                 ? 'text-[#0b5e32] font-bold'
                 : 'text-slate-500 hover:text-slate-900'
             }`}
           >
-            <div className={`p-1.5 rounded-xl transition-all ${activeTab === 'overview' && principalTab === 'catalog' ? 'bg-emerald-50 text-[#0b5e32]' : ''}`}>
-              <FolderOpen className="w-5 h-5" />
+            <div className={`p-1.5 rounded-xl transition-all ${activeTab === 'tracker' ? 'bg-emerald-50 text-[#0b5e32]' : ''}`}>
+              <ClipboardCheck className="w-5 h-5 text-emerald-700" />
             </div>
-            <span className="text-[10px] tracking-tight mt-0.5 leading-none">
-              {language === 'ar' ? 'الملفات' : 'Files'}
+            <span className="text-[10px] tracking-tight mt-0.5 leading-none font-bold">
+              {language === 'ar' ? 'تتبع المواد' : 'Tracker'}
             </span>
           </button>
 

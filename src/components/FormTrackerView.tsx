@@ -31,17 +31,19 @@ import {
   List,
   Building2
 } from 'lucide-react';
-import { ArchivedForm, UserProfile } from '../types';
+import { ArchivedForm, UserProfile, Assessment } from '../types';
 import { translateSubject, translateGrade, isSubjectMatch, isUniversalSubject } from '../lib/translations';
 import { formatSafeDate } from '../utils/dateUtils';
 import principalStampUrl, { getActiveStamp } from './OmanPrincipalStamp';
 
 interface FormTrackerViewProps {
   archivedForms: ArchivedForm[];
+  assessments?: Assessment[];
   userProfile: UserProfile | null;
   language: 'ar' | 'en';
   onRefresh?: () => Promise<void> | void;
   onOpenInArchive?: (form: ArchivedForm) => void;
+  onSelectForm?: (form: ArchivedForm) => void;
   onTransferToPrincipal?: (archiveId: string, adminName: string) => Promise<void>;
   onSignPrincipal?: (archiveId: string, principalName: string, qrData: string, stampUrl?: string) => Promise<void>;
   onSignTeacher?: (archiveId: string, teacherName: string, qrData: string) => Promise<void>;
@@ -192,6 +194,8 @@ export function FormTrackerView({
     if (availableDates.includes(todayIso)) return todayIso;
     return availableDates[0] || 'all';
   });
+
+
 
   // Update sync timestamp whenever archivedForms changes in real time
   useEffect(() => {
@@ -376,6 +380,16 @@ export function FormTrackerView({
     () => Array.from(new Set(roleScopedForms.map((f) => f.schoolName).filter(Boolean))),
     [roleScopedForms]
   );
+
+  // Auto-open school folder for School Representatives / School Principal
+  useEffect(() => {
+    if (userProfile?.role === 'school') {
+      const targetSchool = userProfile.schoolName || uniqueSchools[0];
+      if (targetSchool && !openedSchoolFolder) {
+        setOpenedSchoolFolder(targetSchool);
+      }
+    }
+  }, [userProfile, uniqueSchools, openedSchoolFolder]);
 
   const uniqueSubjects = useMemo(
     () => Array.from(new Set(roleScopedForms.map((f) => f.subjectName || f.subject).filter(Boolean))),
@@ -918,11 +932,16 @@ export function FormTrackerView({
                       }`}
                     >
                       {/* CORNER FLOATING CIRCULAR BADGE SHOWING FORM COUNT */}
-                      {hasForms && (
-                        <div className="absolute -top-3 -right-3 rtl:-right-3 ltr:-left-3 z-20 w-8 h-8 rounded-full bg-rose-600 text-white font-black text-xs flex items-center justify-center shadow-lg ring-4 ring-white border border-rose-700 animate-bounce">
-                          {subj.formsCount}
-                        </div>
-                      )}
+                      <div
+                        className={`absolute -top-3 -right-3 rtl:-right-3 ltr:-left-3 z-20 rounded-full font-black text-xs flex items-center justify-center shadow-lg ring-4 ring-white border transition-all ${
+                          hasForms
+                            ? 'w-8.5 h-8.5 bg-rose-600 text-white border-rose-700 animate-bounce scale-110'
+                            : 'w-8 h-8 bg-slate-200 text-slate-600 border-slate-300'
+                        }`}
+                        title={`${subj.subjectName}: ${subj.formsCount} استمارة`}
+                      >
+                        {subj.formsCount}
+                      </div>
 
                       <div>
                         <div className="flex items-center justify-between mb-3">

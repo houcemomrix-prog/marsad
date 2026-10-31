@@ -21,7 +21,9 @@ import {
   ClipboardCheck,
   CheckSquare,
   FileCheck2,
-  ListFilter
+  ListFilter,
+  Folder,
+  FolderOpen
 } from 'lucide-react';
 import { UserProfile, Assessment } from '../types';
 import { Language, translateGrade, translateSubject, translateStatus } from '../lib/translations';
@@ -96,6 +98,7 @@ export function SchoolPrincipalObserver({
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [approveLoading, setApproveLoading] = useState<boolean>(false);
+  const [openTeacherFolderKey, setOpenTeacherFolderKey] = useState<string | null>(null);
 
   const principalSchool = userProfile.schoolName || 'مدرسة الدقم للتعليم الأساسي';
 
@@ -381,7 +384,68 @@ export function SchoolPrincipalObserver({
     !a.workflowStage || a.workflowStage === 'teacher_submitted'
   );
 
-    return (
+  // Group pending files into Teacher Folders
+  const pendingByTeacherMap = new Map<string, {
+    teacherKey: string;
+    teacherName: string;
+    teacherEmail?: string;
+    subject?: string;
+    files: Assessment[];
+  }>();
+
+  pendingPrincipalApprovalFiles.forEach(file => {
+    let tName = '';
+    let tSubject = file.subject || '';
+    let tEmail = file.schoolEmail || '';
+
+    if (file.teacherName && file.teacherName.trim() && !file.teacherName.includes('@')) {
+      tName = file.teacherName.trim();
+    } else {
+      const matchProfile = teachers.find(t => 
+        (file.schoolId && t.profile.uid === file.schoolId) || 
+        (t.profile.email && file.schoolEmail && t.profile.email.toLowerCase() === file.schoolEmail.toLowerCase()) ||
+        (t.profile.name && file.schoolName && t.profile.name.toLowerCase() === file.schoolName.toLowerCase())
+      );
+      if (matchProfile) {
+        tName = matchProfile.profile.name;
+        if (!tSubject && matchProfile.profile.subject) tSubject = matchProfile.profile.subject;
+      } else if (file.schoolEmail) {
+        if (file.schoolEmail === 'teacher@moe.om') tName = 'د. فاطمة السيابية';
+        else if (file.schoolEmail === 'school@moe.om') tName = 'أ. وليد الخروصي';
+        else if (file.schoolEmail === 'moderator@moe.om') tName = 'أ. سالم الحارثي';
+        else if (file.schoolEmail === 'riyami.math@moe.om') tName = 'أ. وليد الريامي';
+        else if (file.schoolEmail === 'rawahi.arabic@moe.om') tName = 'أ. عائشة الرواحية';
+        else if (file.schoolEmail === 'balushi.it@moe.om') tName = 'أ. أمينة البلوشية';
+        else if (file.schoolEmail === 'hosni.islamic@moe.om') tName = 'الشيخ أحمد الحوسني';
+        else {
+          const handle = file.schoolEmail.split('@')[0].replace(/[._-]/g, ' ');
+          tName = `أ. ${handle.charAt(0).toUpperCase() + handle.slice(1)}`;
+        }
+      } else if (file.schoolName && !file.schoolName.includes('مدرسة')) {
+        tName = file.schoolName;
+      } else {
+        tName = language === 'ar' ? 'أ. معلم المادة' : 'Subject Teacher';
+      }
+    }
+
+    const key = tName;
+    if (!pendingByTeacherMap.has(key)) {
+      pendingByTeacherMap.set(key, {
+        teacherKey: key,
+        teacherName: tName,
+        teacherEmail: tEmail,
+        subject: tSubject,
+        files: [file]
+      });
+    } else {
+      pendingByTeacherMap.get(key)!.files.push(file);
+    }
+  });
+
+  const teacherFolders = Array.from(pendingByTeacherMap.values());
+  const activeTeacherFolder = teacherFolders.find(tf => tf.teacherKey === openTeacherFolderKey) || null;
+
+  return (
       <div className="space-y-7 animate-in fade-in duration-200">
         
         {/* TOP COMPACT BRANDING BAR */}
@@ -418,12 +482,9 @@ export function SchoolPrincipalObserver({
         {/* STEP 2b: PRINCIPAL UPLOAD PERMISSION CONTROL BANNER */}
         <div className="bg-white rounded-3xl p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="w-7 h-7 rounded-xl bg-indigo-600 text-white font-black flex items-center justify-center text-xs">2</span>
-              <h3 className="font-extrabold text-slate-900 text-sm font-heading">
-                {language === 'ar' ? 'الخطوة 2: صلاحية رفع الملفات للمعلمين بالمدرسة' : 'Step 2: Teacher Upload Access Control'}
-              </h3>
-            </div>
+            <h3 className="font-extrabold text-slate-900 text-sm font-heading">
+              {language === 'ar' ? 'صلاحية رفع الملفات للمعلمين بالمدرسة' : 'Teacher Upload Access Control'}
+            </h3>
             <p className="text-xs text-slate-500">
               {language === 'ar'
                 ? `تاريخ الفحص المجدول لمدرستك: ${permissionStatus.inspectionDate || 'اليوم'}. يفتح مدير النظام الصلاحية للمدرسة، ثم يقم مدير المدرسة بتفعيلها للمعلمين.`
@@ -459,142 +520,213 @@ export function SchoolPrincipalObserver({
           </div>
         </div>
 
-        {/* STEP 4: PRINCIPAL APPROVAL QUEUE BEFORE SENDING TO MINISTRY */}
+        {/* STEP 4: PRINCIPAL APPROVAL QUEUE (DIVIDED INTO TEACHER FOLDERS) */}
         {pendingPrincipalApprovalFiles.length > 0 && (
-          <div className="bg-indigo-50/70 border border-indigo-200 rounded-3xl p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between border-b border-indigo-200 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="w-7 h-7 rounded-xl bg-emerald-600 text-white font-black flex items-center justify-center text-xs">4</span>
-                <h3 className="font-extrabold text-slate-900 text-sm font-heading">
-                  {language === 'ar' ? 'الخطوة 4: ملفات المعلمين بانتظار موافقة مدير المدرسة للإرسال للوزارة' : 'Step 4: Pending Principal Approval Queue'}
-                </h3>
+          <div className="bg-gradient-to-br from-indigo-50/70 via-white to-amber-50/40 border border-indigo-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4 animate-in fade-in duration-200">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-150 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white font-black flex items-center justify-center text-sm shadow-2xs shrink-0">
+                  <Folder className="w-5 h-5 text-amber-200" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm sm:text-base font-heading">
+                    {language === 'ar' ? 'ملفات بانتظار الموافقة (مقسمة بمجلدات المعلمين)' : 'Pending Approval Files (Teacher Folders)'}
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {language === 'ar'
+                      ? 'مجلدات بأسماء المعلمين الذين أرسلوا ملفاتهم. افتح مجلد أي معلم للاطلاع على ملفاته والموافقة عليها وإرسالها لمدير النظام.'
+                      : 'Teacher folders with submitted files awaiting principal approval.'}
+                  </p>
+                </div>
               </div>
-              <span className="bg-emerald-600 text-white px-2.5 py-0.5 rounded-full text-[10px] font-bold">
-                {pendingPrincipalApprovalFiles.length} {language === 'ar' ? 'ملفات بانتظار الموافقة' : 'files pending'}
-              </span>
+
+              <div className="flex items-center gap-2 self-start sm:self-auto">
+                <span className="bg-amber-100 text-amber-900 border border-amber-300/80 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-2xs">
+                  <span>📁</span>
+                  <span>{teacherFolders.length} {language === 'ar' ? 'مجلدات معلمين' : 'Teacher Folders'}</span>
+                </span>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {pendingPrincipalApprovalFiles.map((file) => (
-                <div key={`approval-${file.id}`} className="bg-white p-4 rounded-2xl border border-indigo-150 shadow-2xs space-y-3 flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[9px] font-bold px-2 py-0.5 bg-amber-100 text-amber-800 rounded">
-                        {language === 'ar' ? 'مرفوع حديثاً بواسطة المعلم' : 'Teacher Uploaded'}
-                      </span>
-                      <span className="text-[10px] text-slate-400 font-mono">
-                        {new Date(file.createdAt).toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}
+            {/* If a teacher folder is opened -> Show that teacher's files */}
+            {activeTeacherFolder ? (
+              <div className="space-y-4 animate-in fade-in duration-150">
+                {/* Folder Top Bar */}
+                <div className="bg-amber-50/90 border-2 border-amber-300/80 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setOpenTeacherFolderKey(null)}
+                      className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-800 hover:text-slate-950 rounded-xl border border-slate-200 text-xs font-black flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs"
+                      title={language === 'ar' ? 'رجوع لقائمة مجلدات المعلمين' : 'Back to folders'}
+                    >
+                      <ArrowRight className="w-4 h-4 rtl:rotate-0 ltr:rotate-180" />
+                      <span>{language === 'ar' ? 'الرجوع لكافة المجلدات' : 'Back to Folders'}</span>
+                    </button>
+
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-10 h-10 rounded-xl bg-amber-400/30 text-amber-900 border border-amber-400/50 flex items-center justify-center shrink-0">
+                        <FolderOpen className="w-6 h-6 text-amber-700" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-extrabold text-sm sm:text-base text-slate-900 font-heading">
+                            مجلد: {activeTeacherFolder.teacherName}
+                          </h4>
+                          {activeTeacherFolder.subject && (
+                            <span className="text-[10.5px] px-2 py-0.5 rounded-md font-bold bg-white text-indigo-700 border border-indigo-200">
+                              {translateSubject(activeTeacherFolder.subject, language)}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-amber-900 font-medium">
+                          {language === 'ar' 
+                            ? `يحتوي هذا المجلد على (${activeTeacherFolder.files.length}) ملفات بانتظار الموافقة والإرسال لمدير النظام`
+                            : `Contains (${activeTeacherFolder.files.length}) files awaiting approval`}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bulk Approve All For This Teacher */}
+                  {activeTeacherFolder.files.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        for (const f of activeTeacherFolder.files) {
+                          await handleApproveTeacherUpload(f.id, f.title);
+                        }
+                      }}
+                      className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:brightness-110 text-white text-xs font-black rounded-xl cursor-pointer transition-all flex items-center justify-center gap-2 shadow-xs"
+                    >
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>{language === 'ar' ? 'موافقة وإرسال كافة ملفات هذا المعلم' : 'Approve All Files'}</span>
+                    </button>
+                  )}
+                </div>
+
+                {/* Files in this opened teacher folder */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {activeTeacherFolder.files.map((file) => (
+                    <div 
+                      key={`approval-file-${file.id}`}
+                      className="bg-white p-4 sm:p-5 rounded-2xl border-2 border-slate-200/90 hover:border-emerald-500/70 transition-all shadow-xs space-y-3 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[9.5px] font-extrabold px-2 py-0.5 bg-amber-100 text-amber-900 border border-amber-200 rounded-md">
+                            {language === 'ar' ? 'مرفوع حديثاً بواسطة المعلم' : 'Teacher Uploaded'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                            <Clock className="w-3 h-3 text-slate-400" />
+                            {new Date(file.createdAt).toLocaleDateString(language === 'ar' ? 'ar-OM' : 'en-US', {month: 'short', day: 'numeric'})}
+                          </span>
+                        </div>
+
+                        <h4 className="font-bold text-slate-900 text-xs sm:text-sm mt-2 leading-snug">
+                          {file.title}
+                        </h4>
+                        
+                        <div className="flex items-center gap-2 mt-2 flex-wrap">
+                          <span className="text-[10.5px] text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded-md">
+                            {translateSubject(file.subject, language)}
+                          </span>
+                          <span className="text-[10.5px] text-slate-700 font-bold bg-slate-100 px-2 py-0.5 rounded-md">
+                            {translateGrade(file.grade, language)}
+                          </span>
+                          {file.isPdf && (
+                            <span className="text-[9.5px] font-mono font-bold text-rose-700 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded">
+                              PDF
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onInspect(file)}
+                          className="px-3 py-1.5 text-[11px] font-bold text-indigo-600 hover:text-indigo-800 hover:bg-indigo-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>{language === 'ar' ? 'فحص المعاينة' : 'Inspect'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleApproveTeacherUpload(file.id, file.title)}
+                          className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-2xs"
+                        >
+                          <Send className="w-3.5 h-3.5" />
+                          <span>{language === 'ar' ? 'موافقة وارسال لمدير النظام' : 'Approve & Send to System Admin'}</span>
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              /* All Teacher Folders Grid */
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {teacherFolders.map((tf) => (
+                  <div
+                    key={`teacher-folder-${tf.teacherKey}`}
+                    onClick={() => setOpenTeacherFolderKey(tf.teacherKey)}
+                    className="group bg-gradient-to-br from-amber-50/90 via-amber-50/30 to-white hover:from-amber-100/90 hover:via-amber-50 hover:to-white border-2 border-amber-200/90 hover:border-amber-400 rounded-3xl p-5 shadow-xs hover:shadow-md transition-all cursor-pointer relative overflow-hidden flex flex-col justify-between min-h-[175px]"
+                  >
+                    {/* Top corner circle count badge */}
+                    <div className="absolute top-3.5 left-3.5 rtl:left-auto rtl:right-auto rtl:left-3.5 ltr:right-3.5">
+                      <span className="w-7 h-7 rounded-full bg-rose-600 text-white font-mono font-black text-xs flex items-center justify-center shadow-md animate-pulse">
+                        {tf.files.length}
                       </span>
                     </div>
-                    <h4 className="font-bold text-slate-900 text-xs mt-1.5">{file.title}</h4>
-                    <p className="text-[10.5px] text-slate-500 font-medium">
-                      المعلم: {file.schoolName} • {translateSubject(file.subject, language)} • {file.grade}
-                    </p>
-                  </div>
 
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <button
-                      type="button"
-                      onClick={() => onInspect(file)}
-                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800"
-                    >
-                      فحص المعاينة
-                    </button>
+                    <div>
+                      {/* Folder Icon & Teacher Info */}
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-400/25 border border-amber-300 text-amber-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
+                          <Folder className="w-7 h-7 text-amber-600 fill-amber-300/50" />
+                        </div>
+                        <div className="min-w-0 pr-8 rtl:pr-0 rtl:pl-8">
+                          <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-800/80 block">
+                            {language === 'ar' ? 'مجلد معلم' : 'Teacher Folder'}
+                          </span>
+                          <h4 className="font-extrabold text-slate-900 text-sm sm:text-base truncate group-hover:text-amber-900 transition-colors font-heading">
+                            {tf.teacherName}
+                          </h4>
+                        </div>
+                      </div>
 
-                    <button
-                      type="button"
-                      onClick={() => handleApproveTeacherUpload(file.id, file.title)}
-                      className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl cursor-pointer transition-all flex items-center gap-1.5 shadow-2xs"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>{language === 'ar' ? 'الموافقة وإرسال للوزارة (مدير النظام)' : 'Approve & Send to Ministry'}</span>
-                    </button>
+                      {/* Subject and files pill */}
+                      <div className="mt-3.5 flex items-center gap-1.5 flex-wrap">
+                        {tf.subject && (
+                          <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-lg bg-white/95 border border-slate-200/90 text-slate-700 shadow-2xs">
+                            📚 {translateSubject(tf.subject, language)}
+                          </span>
+                        )}
+                        <span className="text-[10.5px] font-bold px-2 py-0.5 rounded-lg bg-amber-100 text-amber-950 border border-amber-300/60">
+                          {tf.files.length} {language === 'ar' ? 'ملفات بالانتظار' : 'pending files'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Bottom Open action button */}
+                    <div className="mt-4 pt-3 border-t border-amber-200/60 flex items-center justify-between text-xs font-bold text-amber-900 group-hover:text-amber-950">
+                      <span className="flex items-center gap-1.5">
+                        <FolderOpen className="w-4 h-4 text-amber-600" />
+                        <span>{language === 'ar' ? 'انقر لفتح ملفات المعلم' : 'Click to open files'}</span>
+                      </span>
+                      <ArrowRight className="w-4 h-4 rtl:rotate-180 group-hover:translate-x-1 rtl:group-hover:-translate-x-1 transition-transform" />
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {/* HIGH-CONTRAST METRICS STATS */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/50 shadow-xs space-y-2 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono">
-                {language === 'ar' ? 'الكوادر المسجلة' : 'Staff Size'}
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-650 font-bold text-sm shrink-0">
-                <Users className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900 font-heading">{totalTeachers} {language === 'ar' ? 'معلمين' : 'Teachers'}</p>
-              <p className="text-[10.5px] text-slate-400 mt-1">{language === 'ar' ? 'الطاقم الأكاديمي النشط للتقييم' : 'Active faculty evaluated in portal'}</p>
-            </div>
-          </div>
 
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/50 shadow-xs space-y-2 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono">
-                {language === 'ar' ? 'اكتمال الرفع' : 'Upload Status'}
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600 shrink-0">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900 font-heading">
-                {completedUploadsCount} / {totalTeachers}
-              </p>
-              <p className="text-[10.5px] text-slate-400 mt-1 flex items-center gap-1">
-                <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                {language === 'ar' ? `${completedUploadsCount} معلمين قد استوفوا النصاب المعتمد` : `${completedUploadsCount} teachers fully compliant`}
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/50 shadow-xs space-y-2 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono">
-                {language === 'ar' ? 'ملفات التقييم بالمدرسة' : 'School Blueprints'}
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-amber-50 flex items-center justify-center text-amber-600 shrink-0">
-                <FileText className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900 font-heading">
-                {totalPaperCount} {language === 'ar' ? 'مرفوعات' : 'Files'}
-              </p>
-              <p className="text-[10.5px] text-slate-400 mt-1">
-                {language === 'ar' 
-                  ? `${approvedPaperCount} معتمد • ${pendingPaperCount} بانتظار الوزارة` 
-                  : `${approvedPaperCount} Approved • ${pendingPaperCount} Pending MOE`}
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-white p-5 rounded-2xl border border-slate-200/50 shadow-xs space-y-2 flex flex-col justify-between">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest font-mono font-sans">
-                {language === 'ar' ? 'التوجيهات والتنبيهات المدرسية' : 'Nudges Demanded'}
-              </span>
-              <div className="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600 shrink-0">
-                <Bell className="w-4 h-4" />
-              </div>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-slate-900 font-heading">
-                {nudgeCount} {language === 'ar' ? 'تذكيرات ودية' : 'Nudges'}
-              </p>
-              <p className="text-[10.5px] text-slate-400 mt-1">
-                {language === 'ar' ? 'تذكيرات أرسلت لتشجيع المعلمين غير الملتزمين' : 'Formal reminders sent to incentivize uploads'}
-              </p>
-            </div>
-          </div>
-
-        </div>
 
         {/* CONTROLS FILTRATION HEADER CARD */}
         <div className="bg-white rounded-3xl border border-slate-200/60 p-5 shadow-xs space-y-4">
